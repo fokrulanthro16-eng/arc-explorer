@@ -154,23 +154,35 @@ def main():
             num_steps = len(trace_logs)
             c_prev, c_slider, c_next = st.columns([1, 6, 1])
 
-            with c_prev:
-                if st.button("◀ Prev", disabled=st.session_state.current_step_idx <= 0):
-                    st.session_state.current_step_idx -= 1
-                    st.rerun()
+            if num_steps <= 1:
+                st.session_state.current_step_idx = 0
+                with c_prev:
+                    st.button("◀ Prev", disabled=True, key="exp_prev_dis")
+                with c_slider:
+                    msg = f"Step 1 of 1" if num_steps == 1 else "No steps recorded"
+                    st.info(f"📌 {msg}")
+                with c_next:
+                    st.button("Next ▶", disabled=True, key="exp_next_dis")
+            else:
+                st.session_state.current_step_idx = max(0, min(st.session_state.current_step_idx, num_steps - 1))
+                with c_prev:
+                    if st.button("◀ Prev", disabled=st.session_state.current_step_idx <= 0, key="exp_prev"):
+                        st.session_state.current_step_idx -= 1
+                        st.rerun()
 
-            with c_slider:
-                st.session_state.current_step_idx = st.slider(
-                    "Step Navigation",
-                    min_value=0,
-                    max_value=max(0, num_steps - 1),
-                    value=min(st.session_state.current_step_idx, max(0, num_steps - 1)),
-                )
+                with c_slider:
+                    st.session_state.current_step_idx = st.slider(
+                        "Step Navigation",
+                        min_value=0,
+                        max_value=num_steps - 1,
+                        value=st.session_state.current_step_idx,
+                        key="exp_slider",
+                    )
 
-            with c_next:
-                if st.button("Next ▶", disabled=st.session_state.current_step_idx >= num_steps - 1):
-                    st.session_state.current_step_idx += 1
-                    st.rerun()
+                with c_next:
+                    if st.button("Next ▶", disabled=st.session_state.current_step_idx >= num_steps - 1, key="exp_next"):
+                        st.session_state.current_step_idx += 1
+                        st.rerun()
 
             # Render selected step
             curr_idx = st.session_state.current_step_idx
@@ -181,7 +193,7 @@ def main():
                 col_grid, col_details = st.columns([1, 1])
 
                 with col_grid:
-                    st.markdown(f"#### Grid State (Step {curr_idx + 1} / {num_steps})")
+                    st.markdown(f"#### Grid State (Step {curr_idx + 1} / {max(1, num_steps)})")
                     # Display grid after action
                     grid_after = trans["obs_after"]["grid"]
                     agent_pos = tuple(trans["obs_after"]["agent_pos"])
@@ -271,23 +283,49 @@ def main():
                 r3.metric("Hazards Hit", rep_summary.get("hazard_count", 0))
                 r4.metric("Discovery Score", f"{rep_summary.get('discovery_score', 0):.1f} / 100")
 
-                # Step slider for replay
+                # Step Navigation for Replay View
                 num_rep_steps = len(rep_logs)
-                if num_rep_steps > 0:
-                    st.session_state.replay_step_idx = st.slider(
-                        "Replay Step Scrub",
-                        min_value=0,
-                        max_value=max(0, num_rep_steps - 1),
-                        value=min(st.session_state.replay_step_idx, max(0, num_rep_steps - 1)),
-                    )
+                c_r_prev, c_r_slider, c_r_next = st.columns([1, 6, 1])
 
-                    r_idx = st.session_state.replay_step_idx
+                if num_rep_steps <= 0:
+                    st.info("No trace steps recorded in this replay.")
+                elif num_rep_steps == 1:
+                    st.session_state.replay_step_idx = 0
+                    with c_r_prev:
+                        st.button("◀ Prev Replay", disabled=True, key="rep_prev_dis")
+                    with c_r_slider:
+                        st.info("📌 Step 1 of 1")
+                    with c_r_next:
+                        st.button("Next Replay ▶", disabled=True, key="rep_next_dis")
+                else:
+                    st.session_state.replay_step_idx = max(0, min(st.session_state.replay_step_idx, num_rep_steps - 1))
+                    with c_r_prev:
+                        if st.button("◀ Prev Replay", disabled=st.session_state.replay_step_idx <= 0, key="rep_prev"):
+                            st.session_state.replay_step_idx -= 1
+                            st.rerun()
+
+                    with c_r_slider:
+                        st.session_state.replay_step_idx = st.slider(
+                            "Replay Step Scrub",
+                            min_value=0,
+                            max_value=num_rep_steps - 1,
+                            value=st.session_state.replay_step_idx,
+                            key="rep_slider",
+                        )
+
+                    with c_r_next:
+                        if st.button("Next Replay ▶", disabled=st.session_state.replay_step_idx >= num_rep_steps - 1, key="rep_next"):
+                            st.session_state.replay_step_idx += 1
+                            st.rerun()
+
+                r_idx = st.session_state.replay_step_idx
+                if 0 <= r_idx < num_rep_steps:
                     r_log = rep_logs[r_idx]
 
                     col_r_grid, col_r_info = st.columns([1, 1])
 
                     with col_r_grid:
-                        st.markdown(f"#### Grid State (Step {r_idx + 1} / {num_rep_steps})")
+                        st.markdown(f"#### Grid State (Step {r_idx + 1} / {max(1, num_rep_steps)})")
                         if r_idx < len(rep_mem):
                             grid_arr = rep_mem[r_idx]["obs_after"]["grid"]
                             pos_arr = tuple(rep_mem[r_idx]["obs_after"]["agent_pos"])
@@ -301,6 +339,7 @@ def main():
                         st.write(f"**Hazard Alert**: `{r_log.get('hazard_alert')}`")
                         st.write(f"**Top Hypothesis**: `{r_log.get('top_hypothesis')}`")
                         st.write(f"**Score**: `{r_log.get('top_score')}`")
+
 
 
 if __name__ == "__main__":

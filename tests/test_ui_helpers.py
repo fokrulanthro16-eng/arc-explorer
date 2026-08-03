@@ -57,3 +57,16 @@ def test_replay_helpers():
         assert success is True
         assert err == ""
         assert data["summary"]["inferred_rule_id"] == "h_color_propagation"
+        assert len(data["trace_logs"]) == 1  # Single-step trace verification
+
+
+def test_single_step_and_empty_grid_rendering():
+    # Single element grid
+    html_single = render_grid_html([[1]], (0, 0))
+    assert "🤖" in html_single
+    assert "Blue" in html_single
+
+    # Empty grid boundary check
+    html_empty = render_grid_html([], (0, 0))
+    assert "<div" in html_empty
+
