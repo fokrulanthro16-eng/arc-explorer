@@ -38,10 +38,10 @@ class KeyDoorRule(BaseRule):
 
         if action == Action.INTERACT:
             # Check if standing on or adjacent to YELLOW trigger (Color.YELLOW = 4)
-            if next_grid[r][c] == Color.YELLOW or any(
+            if (next_grid[r][c] == Color.YELLOW or any(
                 0 <= r + dr < h and 0 <= c + dc < w and next_grid[r + dr][c + dc] == Color.YELLOW
                 for dr, dc in ACTION_DELTAS.values()
-            ):
+            )) and not unlocked:
                 unlocked = True
                 state_vars["unlocked"] = True
                 # Replace all GREEN barriers (3) with EMPTY (0)
@@ -50,6 +50,9 @@ class KeyDoorRule(BaseRule):
                         if next_grid[gr][gc] == Color.GREEN:
                             next_grid[gr][gc] = Color.EMPTY
                 reward = 10.0
+            else:
+                info["no_change"] = True
+
 
         elif action in ACTION_DELTAS:
             dr, dc = ACTION_DELTAS[action]

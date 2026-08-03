@@ -66,7 +66,11 @@ class SafePlanner:
                 current_color = obs.get_cell(r, c)
                 adj_colors = [obs.get_cell(r + dr, c + dc) for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]]
                 if current_color not in [0, 5] or any(c not in [0, 5] for c in adj_colors):
-                    novelty = 1.5  # High priority to experiment interacting with colored triggers
+                    novelty = 1.5
+                # Decay novelty if agent repeatedly INTERACTs on same state
+                if obs.last_action == action and obs.info.get("no_change", False):
+                    novelty = 0.0
+
 
 
             predicted_outcomes = []

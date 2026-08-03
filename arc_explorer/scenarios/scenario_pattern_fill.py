@@ -41,6 +41,11 @@ class PatternFillRule(BaseRule):
                 if next_grid[r][mirror_c] != current_color:
                     next_grid[r][mirror_c] = current_color
                     reward = 15.0
+                else:
+                    info["no_change"] = True
+            else:
+                info["no_change"] = True
+
 
         elif action in ACTION_DELTAS:
             dr, dc = ACTION_DELTAS[action]
