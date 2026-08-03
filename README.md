@@ -83,6 +83,26 @@ ARC-Explorer/
 
 ---
 
+## Local Web UI (Streamlit Dashboard)
+
+ARC Explorer includes an interactive, browser-based web dashboard built with Streamlit. It features a visual grid matrix, real-time step scrubbing, active hypothesis tracking, dynamic benchmark reporting, and JSON trace replay playback.
+
+### 1. Windows Installation
+Ensure dependencies are installed:
+```cmd
+pip install -r requirements.txt
+```
+
+### 2. Start Local Web Dashboard
+Run the Streamlit application:
+```cmd
+python -m streamlit run app.py
+```
+After running this command, open your web browser at:
+`http://localhost:8501`
+
+---
+
 ## Installation Commands
 
 Clone the repository and install dependencies using standard Python 3.10+:
@@ -99,6 +119,7 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 # Install dependencies
 pip install -r requirements.txt
 ```
+
 
 ---
 
