@@ -1,0 +1,2 @@
+# CPU-only dependencies for ARC Explorer baseline
+pytest>=7.0.0
