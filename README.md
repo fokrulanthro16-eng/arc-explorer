@@ -89,8 +89,8 @@ Clone the repository and install dependencies using standard Python 3.10+:
 
 ```bash
 # Clone the repository
-git clone https://github.com/example/ARC-Explorer.git
-cd ARC-Explorer
+git clone https://github.com/fokrulanthro16-eng/arc-explorer.git
+cd arc-explorer
 
 # Create virtual environment (optional)
 python -m venv venv
