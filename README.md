@@ -81,9 +81,23 @@ ARC-Explorer/
 └── README.md                     # Project documentation
 ```
 
+## Official ARC Task Loading & Visualizer
+
+ARC Explorer supports reading, visualizing, and converting official ARC-AGI JSON task files directly into interactive `GridWorld` environments.
+
+- **JSON Parser (`arc_explorer.arc_task`)**: Loads official ARC JSON task structures (`train` and `test` input/output grid pairs).
+- **Environment Adapter (`ARCTaskRule`)**: Transforms ARC task grid pairs into active `GridWorld` environments for hypothesis discovery.
+- **UI Task Viewer (`🧩 ARC Tasks View`)**: Side-by-side rendering of input vs target output grids, with custom ARC JSON file upload support.
+
+### Sample Tasks
+Sample tasks are included in `samples/`:
+- `samples/arc_task_color_swap.json`: Color transformation task.
+- `samples/arc_task_reflection.json`: Matrix reflection task.
+
 ---
 
 ## Local Web UI (Streamlit Dashboard)
+
 
 ARC Explorer includes an interactive, browser-based web dashboard built with Streamlit. It features a visual grid matrix, real-time step scrubbing, active hypothesis tracking, dynamic benchmark reporting, and JSON trace replay playback.
 

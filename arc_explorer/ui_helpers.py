@@ -106,6 +106,17 @@ def list_available_replays(replay_dir: str = "replays") -> List[str]:
     ]
 
 
+def list_available_arc_tasks(samples_dir: str = "samples") -> List[str]:
+    """Scans and lists available ARC task JSON files."""
+    if not os.path.exists(samples_dir):
+        return []
+    return [
+        os.path.join(samples_dir, f)
+        for f in sorted(os.listdir(samples_dir))
+        if f.endswith(".json") and "arc_task" in f
+    ]
+
+
 def load_and_verify_replay(filepath: str) -> Tuple[bool, Optional[Dict[str, Any]], str]:
     """Loads and validates a replay JSON file, returning (success, data, error_message)."""
     try:
@@ -115,3 +126,4 @@ def load_and_verify_replay(filepath: str) -> Tuple[bool, Optional[Dict[str, Any]
         return True, data, ""
     except Exception as e:
         return False, None, str(e)
+

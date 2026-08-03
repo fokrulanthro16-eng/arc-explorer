@@ -5,10 +5,12 @@ import streamlit as st
 from arc_explorer.agent import ExplorerAgent
 from arc_explorer.scenarios import create_scenario_1, create_scenario_2, create_scenario_3
 from arc_explorer.replay import ReplayLogger
+from arc_explorer.arc_task import ARCTask, create_arc_task_environment
 from arc_explorer.ui_helpers import (
     render_grid_html,
     run_benchmark_evaluation,
     list_available_replays,
+    list_available_arc_tasks,
     load_and_verify_replay,
     COLOR_HEX_MAP,
 )
@@ -126,7 +128,13 @@ def main():
         st.success("Benchmark evaluation completed! Check the 📈 **Benchmark View** tab.")
 
     # Main Tabs
-    tab_exp, tab_bench, tab_replay = st.tabs(["🔬 Exploration View", "📈 Benchmark View", "📜 Replay View"])
+    tab_exp, tab_bench, tab_replay, tab_arc = st.tabs([
+        "🔬 Exploration View",
+        "📈 Benchmark View",
+        "📜 Replay View",
+        "🧩 ARC Tasks View",
+    ])
+
 
     # --- TAB 1: EXPLORATION VIEW ---
     with tab_exp:
@@ -355,7 +363,92 @@ def main():
                         st.write(f"**Top Hypothesis**: `{r_log.get('top_hypothesis')}`")
                         st.write(f"**Score**: `{r_log.get('top_score')}`")
 
+    # --- TAB 4: ARC TASKS VIEW ---
+    with tab_arc:
+        st.subheader("🧩 Official ARC Task Loader & Visualizer")
+        st.caption(
+            "Load and inspect official ARC-AGI task JSON files, view input/output grids, "
+            "and convert tasks into interactive GridWorld environments."
+        )
+
+        arc_task_files = list_available_arc_tasks("samples")
+
+        col_file_sel, col_file_up = st.columns([1, 1])
+        with col_file_sel:
+            selected_arc_file = st.selectbox(
+                "Select Sample ARC Task JSON",
+                options=arc_task_files,
+                help="Choose from pre-packaged ARC sample tasks in samples/ directory.",
+            )
+        with col_file_up:
+            uploaded_arc_file = st.file_uploader(
+                "Or Upload Custom ARC Task JSON",
+                type=["json"],
+                help="Upload any official ARC task JSON file.",
+            )
+
+        arc_task = None
+        if uploaded_arc_file is not None:
+            try:
+                import json
+                task_dict = json.load(uploaded_arc_file)
+                arc_task = ARCTask.load_from_dict(task_dict, task_id=uploaded_arc_file.name)
+                st.success(f"Successfully loaded uploaded task: `{uploaded_arc_file.name}`")
+            except Exception as e:
+                st.error(f"Error parsing uploaded ARC JSON task: {e}")
+        elif selected_arc_file:
+            try:
+                arc_task = ARCTask.load_from_file(selected_arc_file)
+                st.info(f"Loaded task: `{arc_task.task_id}`")
+            except Exception as e:
+                st.error(f"Error loading ARC JSON task file: {e}")
+
+        if arc_task:
+            st.markdown(f"### ARC Task: `{arc_task.task_id}`")
+            st.write(f"**Training Pairs**: `{len(arc_task.train_pairs)}` | **Test Pairs**: `{len(arc_task.test_pairs)}`")
+
+            # Display Train Pairs
+            st.markdown("#### Training Examples (Input ➔ Target Output Grids)")
+            for idx, pair in enumerate(arc_task.train_pairs):
+                st.markdown(f"**Train Pair #{idx + 1}**")
+                col_in, col_out = st.columns(2)
+                with col_in:
+                    st.caption("Input Grid")
+                    st.components.v1.html(render_grid_html(pair.input_grid, (0, 0)), height=320)
+                with col_out:
+                    st.caption("Target Output Grid")
+                    if pair.output_grid:
+                        st.components.v1.html(render_grid_html(pair.output_grid, (0, 0)), height=320)
+                    else:
+                        st.caption("No target output provided.")
+
+            # Convert to GridWorld & Explore button
+            if st.button(f"🚀 Convert & Explore Task ({arc_task.task_id})", use_container_width=True):
+                try:
+                    env = create_arc_task_environment(arc_task, pair_type="train", index=0, max_steps=max_steps)
+                    agent = ExplorerAgent()
+                    result = agent.run_exploration(env, max_steps=max_steps)
+
+                    os.makedirs("replays", exist_ok=True)
+                    replay_path = f"replays/ui_arc_task_{arc_task.task_id}.json"
+                    ReplayLogger.save_replay(replay_path, result, memory=agent.memory, scenario_name=f"ARC Task: {arc_task.task_id}")
+
+                    st.session_state.current_result = {
+                        "scenario_name": f"ARC Task: {arc_task.task_id}",
+                        "env_initial_grid": env.initial_grid,
+                        "env_initial_pos": env.initial_pos,
+                        "result": result,
+                        "memory_transitions": agent.memory.to_list(),
+                    }
+                    st.session_state.current_step_idx = 0
+                    st.success(
+                        f"Exploration completed for ARC Task `{arc_task.task_id}`! "
+                        f"Results available in 🔬 **Exploration View** tab."
+                    )
+                except Exception as e:
+                    st.error(f"Error executing exploration on ARC task: {e}")
 
 
 if __name__ == "__main__":
     main()
+

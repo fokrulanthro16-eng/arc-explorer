@@ -62,6 +62,8 @@ ARC Explorer implements a closed-loop active learning architecture for rule disc
   $$\text{Utility}(a) = \text{InfoGain}(a) + \alpha \cdot \text{Novelty}(a) - \beta \cdot \text{HazardPenalty}(a)$$
 - **Safety Pre-filtering**: Actions predicted to trigger environmental hazards with probability exceeding $\tau_{hazard} = 0.4$ are excluded from execution whenever safe alternative actions exist.
 
-### 6. Replay Engine (`replay.py`)
-- Serializes full execution traces (observations, action selections, safety flags, hypothesis score rankings) to JSON.
-- Enables deterministic trace verification and step-by-step reasoning playback via CLI.
+### 7. ARC Task Subsystem (`arc_task.py`)
+- **ARCTask Container**: Reads and parses official ARC-AGI JSON data into structured `ARCPair` objects representing training and testing grid pairs.
+- **ARCTaskRule**: Adapts input grid transformations into an environment rule where agent interactions modify matrix elements to achieve target ARC outputs.
+- **Environment Adapter**: `create_arc_task_environment()` converts any train/test ARC task pair into an active `GridWorld` environment compatible with `ExplorerAgent`.
+
