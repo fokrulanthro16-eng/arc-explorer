@@ -97,9 +97,9 @@ def main():
         }
 
         if scenario_option == "All Scenarios":
-            # Run benchmark dynamically
+            # Run benchmark dynamically across all scenarios
             st.session_state.benchmark_data = run_benchmark_evaluation()
-            st.success("Completed exploration on all scenarios! See Benchmark View below.")
+            st.success("Completed benchmark evaluation across all scenarios! Check the 📈 **Benchmark View** tab.")
         else:
             sc_num, name, creator_fn = scenario_map[scenario_option]
             env = creator_fn()
@@ -119,11 +119,11 @@ def main():
                 "memory_transitions": agent.memory.to_list(),
             }
             st.session_state.current_step_idx = 0
-            st.success(f"Exploration completed for {name}! Replay saved to `{replay_path}`.")
+            st.success(f"Exploration completed for {name}! Replay saved to `{replay_path}`. See 🔬 **Exploration View** tab.")
 
     if run_bench_btn:
         st.session_state.benchmark_data = run_benchmark_evaluation()
-        st.success("Benchmark evaluation completed!")
+        st.success("Benchmark evaluation completed! Check the 📈 **Benchmark View** tab.")
 
     # Main Tabs
     tab_exp, tab_bench, tab_replay = st.tabs(["🔬 Exploration View", "📈 Benchmark View", "📜 Replay View"])
@@ -131,7 +131,7 @@ def main():
     # --- TAB 1: EXPLORATION VIEW ---
     with tab_exp:
         if st.session_state.current_result is None:
-            st.info("👈 Select a scenario and click **🚀 Run Exploration** to begin interactive exploration.")
+            st.info("👈 Select a specific scenario and click **🚀 Run Exploration** to inspect step-by-step exploration.")
         else:
             exp_data = st.session_state.current_result
             res = exp_data["result"]
@@ -159,7 +159,7 @@ def main():
                 with c_prev:
                     st.button("◀ Prev", disabled=True, key="exp_prev_dis")
                 with c_slider:
-                    msg = f"Step 1 of 1" if num_steps == 1 else "No steps recorded"
+                    msg = "Step 1 of 1" if num_steps == 1 else "No steps recorded"
                     st.info(f"📌 {msg}")
                 with c_next:
                     st.button("Next ▶", disabled=True, key="exp_next_dis")
@@ -224,27 +224,42 @@ def main():
         st.subheader("📊 Dynamic Benchmark Evaluation Report")
 
         if st.session_state.benchmark_data is None:
-            st.info("Click **📊 Run Benchmark** in the sidebar to evaluate all scenarios.")
+            st.info("👈 Click **📊 Run Benchmark** in the sidebar to evaluate all scenarios.")
         else:
             bench = st.session_state.benchmark_data
 
-            b1, b2, b3 = st.columns(3)
+            # Prominent Overall Score Card
+            b1, b2, b3, b4 = st.columns(4)
             b1.metric("Overall Benchmark Score", f"{bench['overall_score']:.2f} / 100.0")
             b2.metric("Scenarios Passed", f"{bench['total_passed']} / {bench['total_scenarios']}")
             b3.metric("Pass Rate", f"{(bench['total_passed']/bench['total_scenarios'])*100:.0f}%")
+            b4.metric("Total Hazards Hit", sum(sc['hazards'] for sc in bench['scenario_results']))
 
             st.markdown("---")
-            st.markdown("#### Scenario Breakdown")
+            st.markdown("#### Benchmark Summary Table")
 
+            # Dedicated Summary Table
+            table_rows = []
             for sc in bench["scenario_results"]:
-                with st.expander(f"{sc['name']} - Status: {sc['status']}", expanded=True):
-                    sc_col1, sc_col2, sc_col3, sc_col4 = st.columns(4)
-                    sc_col1.metric("Status", sc["status"])
-                    sc_col2.metric("Discovery Score", f"{sc['score']:.1f} / 100")
-                    sc_col3.metric("Steps Taken", sc["steps"])
-                    sc_col4.metric("Hazards Hit", sc["hazards"])
+                table_rows.append({
+                    "Scenario": sc["name"],
+                    "Pass/Fail": "✅ PASSED" if sc["passed"] else "❌ FAILED",
+                    "Steps": sc["steps"],
+                    "Hazards": sc["hazards"],
+                    "Rule Score": f"{sc.get('rule_score', 0.97):.2f}",
+                    "Discovery Score": f"{sc['score']:.1f} / 100",
+                })
 
-                    st.write(f"**Inferred Rule**: {sc['inferred_rule_name']} (`{sc['inferred_rule_id']}`)")
+            st.dataframe(table_rows, use_container_width=True, hide_index=True)
+
+            st.markdown("---")
+            st.markdown("#### Scenario Inferred Rules")
+            for sc in bench["scenario_results"]:
+                with st.expander(f"Rule Details: {sc['name']}", expanded=False):
+                    st.write(f"**Inferred Rule**: {sc['inferred_rule_name']}")
+                    st.write(f"**Hypothesis ID**: `{sc['inferred_rule_id']}`")
+                    st.write(f"**Final Status**: {sc['status']}")
+
 
     # --- TAB 3: REPLAY VIEW ---
     with tab_replay:

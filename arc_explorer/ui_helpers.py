@@ -78,10 +78,12 @@ def run_benchmark_evaluation() -> Dict[str, Any]:
             "status": "PASSED" if is_passed else "FAILED",
             "inferred_rule_id": result["inferred_rule_id"],
             "inferred_rule_name": result["inferred_rule_name"],
+            "rule_score": result["rule_score"],
             "steps": result["total_steps"],
             "hazards": result["hazard_count"],
             "score": result["discovery_score"],
         })
+
         scores.append(result["discovery_score"])
 
     overall_score = round(sum(scores) / len(scores), 2) if scores else 0.0
