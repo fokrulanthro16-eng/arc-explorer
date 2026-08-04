@@ -269,6 +269,206 @@ class LineExtendOperator(SymbolicOperator):
         return out
 
 
+class RaycastLineExtensionOperator(SymbolicOperator):
+    """Generalized ray-casting operator that detects coloured line/ray seeds
+    and extends them horizontally, vertically, or diagonally until a grid
+    boundary or blocking object is reached.
+
+    Supports both forward (unidirectional) and bidirectional extension.
+    All parameters (ray_color, directions, stop condition) are inferred
+    dynamically from training pairs — nothing is hard-coded.
+    """
+
+    # The 8 cardinal and diagonal unit vectors.
+    ALL_DIRECTIONS = [
+        (-1, 0), (1, 0), (0, -1), (0, 1),
+        (-1, -1), (-1, 1), (1, -1), (1, 1),
+    ]
+
+    def __init__(
+        self,
+        ray_color: int,
+        directions: List[Tuple[int, int]],
+        bidirectional: bool = False,
+        stop_colors: Optional[Set[int]] = None,
+        background: int = 0,
+    ):
+        dir_labels = {
+            (-1, 0): "N", (1, 0): "S", (0, -1): "W", (0, 1): "E",
+            (-1, -1): "NW", (-1, 1): "NE", (1, -1): "SW", (1, 1): "SE",
+        }
+        dir_tag = "+".join(dir_labels.get(d, str(d)) for d in directions)
+        bidir_tag = "bidir" if bidirectional else "unidir"
+        super().__init__(
+            f"RaycastLineExtension(c={ray_color},{dir_tag},{bidir_tag})",
+            complexity=1.3,
+        )
+        self.ray_color = ray_color
+        self.directions = list(directions)
+        self.bidirectional = bidirectional
+        self.stop_colors: Set[int] = stop_colors if stop_colors is not None else set()
+        self.background = background
+
+    # ── grid transformation ──────────────────────────────────────────
+
+    def apply(self, grid: List[List[int]]) -> List[List[int]]:
+        if not grid or not grid[0]:
+            return grid
+        h, w = len(grid), len(grid[0])
+        out = [list(row) for row in grid]
+
+        # Collect original seed positions (cells already carrying ray_color)
+        seeds: Set[Tuple[int, int]] = set()
+        for r in range(h):
+            for c in range(w):
+                if grid[r][c] == self.ray_color:
+                    seeds.add((r, c))
+
+        if not seeds:
+            return out
+
+        # Build effective direction list (add opposites when bidirectional)
+        effective_dirs = list(self.directions)
+        if self.bidirectional:
+            for dr, dc in self.directions:
+                opp = (-dr, -dc)
+                if opp not in effective_dirs:
+                    effective_dirs.append(opp)
+
+        for sr, sc in seeds:
+            for dr, dc in effective_dirs:
+                # Only extend from endpoint seeds in this direction —
+                # skip interior seeds whose neighbour is also a seed.
+                if (sr + dr, sc + dc) in seeds:
+                    continue
+
+                cr, cc = sr + dr, sc + dc
+                while 0 <= cr < h and 0 <= cc < w:
+                    cell = out[cr][cc]
+                    if cell == self.background:
+                        out[cr][cc] = self.ray_color
+                    elif cell == self.ray_color:
+                        pass  # already painted — continue through
+                    else:
+                        break  # blocked by any other colour
+                    cr += dr
+                    cc += dc
+
+        return out
+
+    def to_dict(self) -> Dict[str, Any]:
+        base = super().to_dict()
+        base.update({
+            "ray_color": self.ray_color,
+            "directions": self.directions,
+            "bidirectional": self.bidirectional,
+            "stop_colors": sorted(self.stop_colors),
+        })
+        return base
+
+    # ── parameter inference from training pairs ──────────────────────
+
+    @staticmethod
+    def infer_from_pairs(
+        train_pairs: List[Any], background: int = 0
+    ) -> List["RaycastLineExtensionOperator"]:
+        """Analyses all training pairs to infer ray colour, extension
+        directions, bidirectionality, and stop colours.  Returns a
+        (possibly empty) list of candidate operators."""
+        from collections import Counter
+
+        ALL_DIRS = RaycastLineExtensionOperator.ALL_DIRECTIONS
+
+        direction_votes: Counter = Counter()
+        color_votes: Counter = Counter()
+        stop_colors_found: Set[int] = set()
+        opposite_evidence = 0
+
+        for pair in train_pairs:
+            in_g, out_g = pair.input_grid, pair.output_grid
+            if not in_g or not in_g[0]:
+                continue
+            if len(in_g) != len(out_g) or len(in_g[0]) != len(out_g[0]):
+                continue
+            h, w = len(in_g), len(in_g[0])
+
+            # Seeds: non-background cells in the input grid
+            seeds_by_color: Dict[int, Set[Tuple[int, int]]] = {}
+            for r in range(h):
+                for c in range(w):
+                    if in_g[r][c] != background:
+                        seeds_by_color.setdefault(in_g[r][c], set()).add((r, c))
+
+            pair_dirs_per_color: Dict[int, Set[Tuple[int, int]]] = {}
+
+            for color, seed_set in seeds_by_color.items():
+                for sr, sc in seed_set:
+                    for dr, dc in ALL_DIRS:
+                        # Only trace from endpoint seeds
+                        if (sr + dr, sc + dc) in seed_set:
+                            continue
+
+                        # Walk forward and count newly-painted cells
+                        extended = 0
+                        cr, cc = sr + dr, sc + dc
+                        while 0 <= cr < h and 0 <= cc < w:
+                            if in_g[cr][cc] == background and out_g[cr][cc] == color:
+                                extended += 1
+                            elif out_g[cr][cc] == color:
+                                pass  # seed or already-painted
+                            else:
+                                break
+                            cr, cc = cr + dr, cc + dc
+
+                        if extended > 0:
+                            direction_votes[(dr, dc)] += extended
+                            color_votes[color] += extended
+                            pair_dirs_per_color.setdefault(color, set()).add((dr, dc))
+
+                            # Check stop colour (the cell that halted the walk)
+                            if 0 <= cr < h and 0 <= cc < w:
+                                blocker = out_g[cr][cc]
+                                if blocker != background and blocker != color:
+                                    stop_colors_found.add(blocker)
+
+            # Detect bidirectionality within this pair
+            for color, dirs in pair_dirs_per_color.items():
+                for dr, dc in dirs:
+                    if (-dr, -dc) in dirs:
+                        opposite_evidence += 1
+
+        if not color_votes:
+            return []
+
+        ray_color = color_votes.most_common(1)[0][0]
+        active_dirs = [d for d in ALL_DIRS if direction_votes[d] > 0]
+        bidirectional = opposite_evidence > 0
+
+        if bidirectional:
+            # Deduplicate opposite pairs — keep canonical direction only
+            canonical: List[Tuple[int, int]] = []
+            seen: Set[Tuple[int, int]] = set()
+            for d in active_dirs:
+                if d not in seen:
+                    canonical.append(d)
+                    seen.add(d)
+                    seen.add((-d[0], -d[1]))
+            active_dirs = canonical
+
+        if not active_dirs:
+            return []
+
+        return [
+            RaycastLineExtensionOperator(
+                ray_color=ray_color,
+                directions=active_dirs,
+                bidirectional=bidirectional,
+                stop_colors=stop_colors_found,
+                background=background,
+            )
+        ]
+
+
 class ObjectTransformOperator(SymbolicOperator):
     """Transforms isolated connected component objects filtered by color/size/position."""
 
@@ -545,6 +745,10 @@ class ParameterSynthesisEngine:
         candidates.append(Rotational4FoldSymmetryOperator())
         candidates.append(CompleteSymmetryOperator())
         candidates.append(TessellateLatticeOperator())
+
+        # 7. Raycast Line Extension
+        raycast_candidates = RaycastLineExtensionOperator.infer_from_pairs(train_pairs)
+        candidates.extend(raycast_candidates)
 
         # Deduplicate candidates by name
         unique_candidates: Dict[str, SymbolicOperator] = {}
