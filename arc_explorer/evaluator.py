@@ -196,13 +196,14 @@ class BatchEvaluator:
             )
 
         try:
-            # 1. Build & Evaluate Symbolic Hypothesis Graph on all training pairs
+            # 1. Build & Evaluate Symbolic Hypothesis Graph with search-budget limits
             graph = SymbolicHypothesisGraph()
             best_hyp = graph.build_and_evaluate(task.train_pairs)
 
             env = create_arc_task_environment(task, pair_type="train", index=0, max_steps=max_steps)
             agent = ExplorerAgent()
             result = agent.run_exploration(env, max_steps=max_steps)
+
 
             runtime = time.time() - start_time
             predicted_grid = [list(r) for r in env.grid]

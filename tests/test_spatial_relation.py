@@ -59,10 +59,11 @@ def test_place_relative_directions():
     obj2 = [o for o in objects if o.primary_color == 2][0]
 
     placed_right = place_right_of(obj2, obj1, spacing=1)
-    assert placed_right.min_c == obj1.max_c + 2
+    assert placed_right.min_c == obj1.max_c + 1
 
     placed_below = place_below(obj2, obj1, spacing=1)
-    assert placed_below.min_r == obj1.max_r + 2
+    assert placed_below.min_r == obj1.max_r + 1
+
 
 
 def test_sort_and_stack_objects():

@@ -523,8 +523,16 @@ class ParameterSynthesisEngine:
         for dir_t in ["vertical", "horizontal"]:
             candidates.append(StackObjectsOperator(direction=dir_t))
 
-        for t_c in [1, 2, 3, 4, 5]:
-            for r_c in [1, 2, 3, 4, 5]:
+        # Only generate relational operators for colors actually present in train_pairs
+        present_colors = set(c for pair in train_pairs for r in pair.input_grid for c in r if c != 0)
+        for pair in train_pairs:
+            for r in pair.output_grid:
+                for c in r:
+                    if c != 0:
+                        present_colors.add(c)
+
+        for t_c in present_colors:
+            for r_c in present_colors:
                 if t_c != r_c:
                     for edge_t in ["top", "bottom", "left", "right", "center"]:
                         candidates.append(AlignToAnchorOperator(t_c, r_c, edge=edge_t))
@@ -544,9 +552,9 @@ class ParameterSynthesisEngine:
             if op.name not in unique_candidates:
                 unique_candidates[op.name] = op
 
-        return list(unique_candidates.values())
-
-
+        res = list(unique_candidates.values())
+        res.sort(key=lambda op: op.complexity)
+        return res
 
 
 
@@ -621,20 +629,29 @@ class SymbolicHypothesis:
 class SymbolicDAGPlanner:
     """N-depth Acyclic Directed Graph (DAG) search planner for multi-stage symbolic reasoning."""
 
-    def __init__(self, max_depth: int = 4):
+    def __init__(self, max_depth: int = 4, max_hypotheses: int = 5000, time_budget_sec: float = 3.0):
         self.max_depth = max_depth
+        self.max_hypotheses = max_hypotheses
+        self.time_budget_sec = time_budget_sec
+
+
 
     def search_dag_hypotheses(
         self, train_pairs: List[Any], candidate_operators: List[SymbolicOperator]
     ) -> List[SymbolicHypothesis]:
-        """Explores N-depth acyclic operator paths, avoiding state cycles."""
+        """Explores N-depth acyclic operator paths, avoiding state cycles and respecting search budget limits."""
+        import time
+        start_time = time.time()
         hypotheses: List[SymbolicHypothesis] = []
         visited_paths: Set[Tuple[str, ...]] = set()
 
         # Seed queue with 1-op paths
         queue: List[List[SymbolicOperator]] = [[op] for op in candidate_operators]
 
-        while queue:
+        while queue and len(hypotheses) < self.max_hypotheses:
+            if time.time() - start_time > self.time_budget_sec:
+                break
+
             path = queue.pop(0)
             path_signature = tuple(op.name for op in path)
             if path_signature in visited_paths:
@@ -652,11 +669,14 @@ class SymbolicDAGPlanner:
             # Expand path if below max_depth
             if len(path) < self.max_depth:
                 for next_op in candidate_operators:
+                    if time.time() - start_time > self.time_budget_sec:
+                        break
+
                     # Cycle prevention 1: Do not repeat exact same operator consecutively unless non-idempotent
                     if path[-1].name == next_op.name and not isinstance(next_op, BoundingBoxCropOperator):
                         continue
 
-                    # Cycle prevention 2: Check if next_op creates a grid state cycle on pair 0
+                    # Cycle prevention 2: Check if next_op creates a grid state cycle or has zero effect (no-op)
                     if train_pairs:
                         in_g0 = train_pairs[0].input_grid
                         grid_states = [in_g0]
@@ -666,13 +686,15 @@ class SymbolicDAGPlanner:
                             grid_states.append(curr)
 
                         next_curr = next_op.apply(curr)
-                        # If next state is identical to any prior state in path, prune cycle
-                        if any(next_curr == prev for prev in grid_states):
+                        # If next state is identical to current state or any prior state in path, prune
+                        if next_curr == curr or any(next_curr == prev for prev in grid_states):
                             continue
+
 
                     queue.append(path + [next_op])
 
         return hypotheses
+
 
 
 class SymbolicHypothesisGraph:
