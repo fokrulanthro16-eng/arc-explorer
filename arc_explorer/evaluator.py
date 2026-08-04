@@ -2,8 +2,10 @@
 
 import os
 import json
+import csv
 import time
 import statistics
+
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Callable, Tuple
 from arc_explorer.arc_task import ARCTask, create_arc_task_environment
@@ -105,7 +107,90 @@ class BatchEvalReport:
             "task_results": [r.to_dict() for r in self.task_results],
         }
 
+    def export_full_training_reports(self, output_dir: str = "reports") -> Dict[str, str]:
+        """Exports full_training_results.csv, full_training_report.md, and full_training_failures.json."""
+        os.makedirs(output_dir, exist_ok=True)
+        csv_path = os.path.join(output_dir, "full_training_results.csv")
+        md_path = os.path.join(output_dir, "full_training_report.md")
+        json_failures_path = os.path.join(output_dir, "full_training_failures.json")
+
+        # 1. Export CSV
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                "task_id", "filename", "status", "exact_match",
+                "runtime_sec", "inferred_rule_name", "failure_reason"
+            ])
+            for res in self.task_results:
+                writer.writerow([
+                    res.task_id, res.filename, res.status, res.exact_match,
+                    f"{res.runtime_sec:.4f}", res.inferred_rule_name, res.failure_reason
+                ])
+
+        # 2. Failure Clustering
+        from arc_explorer.failure_clustering import categorize_failed_tasks
+        unsolved_res = [res for res in self.task_results if not res.exact_match]
+        failure_clusters = categorize_failed_tasks(unsolved_res)
+
+        # 3. Export Failures JSON
+        failures_data = {
+            "unsolved_count": len(unsolved_res),
+            "clusters": failure_clusters,
+            "failed_task_details": [res.to_dict() for res in unsolved_res],
+        }
+        with open(json_failures_path, "w", encoding="utf-8") as f:
+            json.dump(failures_data, f, indent=2)
+
+        # 4. Export Markdown Report
+        timeouts_count = sum(1 for res in self.task_results if "timeout" in res.failure_reason.lower())
+        errors_count = sum(1 for res in self.task_results if res.status == "ERROR")
+        solved_tasks = [res for res in self.task_results if res.exact_match]
+
+        md_content = [
+            "# Full Training Evaluation Benchmark Report",
+            "",
+            "## Summary Metrics",
+            f"- **Total Tasks Evaluated**: `{self.total_tasks}`",
+            f"- **Completed Tasks**: `{self.completed_tasks}`",
+            f"- **Exact Matches**: `{self.exact_matches}`",
+            f"- **Exact-Match Accuracy**: `{self.exact_match_pct:.2f}%`",
+            f"- **Timeouts**: `{timeouts_count}`",
+            f"- **Runtime Errors**: `{errors_count}`",
+            f"- **Average Task Runtime**: `{self.avg_runtime_sec:.4f}s`",
+            f"- **Median Task Runtime**: `{self.median_runtime_sec:.4f}s`",
+            f"- **Total Benchmark Runtime**: `{self.total_runtime_sec:.4f}s`",
+            "",
+            "## Solved Tasks & Reasoning Modules",
+            "| # | Task ID | Runtime (s) | Inferred Reasoning Module / Pipeline |",
+            "|---|:---:|:---:|---|",
+        ]
+
+        for idx, res in enumerate(solved_tasks, 1):
+            md_content.append(f"| {idx} | `{res.task_id}` | `{res.runtime_sec:.4f}s` | `{res.inferred_rule_name}` |")
+
+        md_content.extend([
+            "",
+            "## Unsolved Tasks & Failure Clustering",
+        ])
+
+        if not unsolved_res:
+            md_content.append("**Zero Unsolved Tasks** — 100.00% exact-match achieved across all training tasks.")
+        else:
+            for cluster_name, task_list in failure_clusters.items():
+                if task_list:
+                    md_content.append(f"- **{cluster_name}** ({len(task_list)} tasks): {', '.join(f'`{t}`' for t in task_list)}")
+
+        with open(md_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(md_content) + "\n")
+
+        return {
+            "csv": csv_path,
+            "markdown": md_path,
+            "failures": json_failures_path,
+        }
+
     def export_json(self, output_dir: str = "reports") -> str:
+
         """Exports batch evaluation report to a JSON file."""
         os.makedirs(output_dir, exist_ok=True)
         filepath = os.path.join(output_dir, f"arc_batch_eval_{self.timestamp}.json")

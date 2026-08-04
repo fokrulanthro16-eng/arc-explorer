@@ -102,14 +102,53 @@ def main():
     eval_parser.add_argument(
         "--folder",
         type=str,
-        default="samples",
+        default="data/arc_training",
         help="Path to folder containing ARC JSON task files",
     )
     eval_parser.add_argument(
         "--output",
         type=str,
         default="reports",
-        help="Output directory to save evaluation JSON and CSV reports",
+        help="Output directory to save evaluation JSON, CSV, and markdown reports",
+    )
+
+    # 'audit-dataset' subcommand
+    audit_parser = subparsers.add_parser("audit-dataset", help="Audit local dataset folders for valid ARC task files")
+    audit_parser.add_argument(
+        "--folder",
+        type=str,
+        default="data/arc_training",
+        help="Path to folder containing ARC JSON task files to audit",
+    )
+
+    # 'submit' subcommand
+    submit_parser = subparsers.add_parser("submit", help="Generate Kaggle / ARC Prize competition submission JSON")
+    submit_parser.add_argument(
+        "--folder",
+        type=str,
+        required=True,
+        help="Path to task folder (e.g., data/arc_test or data/arc_training)",
+    )
+    submit_parser.add_argument(
+        "--output",
+        type=str,
+        default="submission.json",
+        help="Output filepath for generated submission JSON",
+    )
+
+    # 'validate-submission' subcommand
+    val_parser = subparsers.add_parser("validate-submission", help="Validate an ARC submission JSON file offline")
+    val_parser.add_argument(
+        "--tasks",
+        type=str,
+        required=True,
+        help="Path to task folder used for prediction",
+    )
+    val_parser.add_argument(
+        "--submission",
+        type=str,
+        default="submission.json",
+        help="Path to submission JSON file to validate",
     )
 
     args = parser.parse_args()
@@ -164,6 +203,7 @@ def main():
 
         json_path = report.export_json(output_dir=args.output)
         csv_path = report.export_csv(output_dir=args.output)
+        full_reports = report.export_full_training_reports(output_dir=args.output)
 
         print("--------------------------------------------------")
         print("BATCH EVALUATION SUMMARY METRICS:")
@@ -178,11 +218,54 @@ def main():
         print("--------------------------------------------------")
         print(f"[+] Exported JSON report: {json_path}")
         print(f"[+] Exported CSV summary: {csv_path}")
+        print(f"[+] Exported Full Training Report: {full_reports['markdown']}")
+        print(f"[+] Exported Full Failures JSON  : {full_reports['failures']}")
         print("==================================================")
 
+    elif args.command == "audit-dataset":
+        from arc_explorer.dataset_audit import audit_dataset_folder
+        print("==================================================")
+        print(f" AUDITING DATASET FOLDER: {args.folder}")
+        print("==================================================")
+        audit_res = audit_dataset_folder(args.folder)
+        print(f"  Folder Path           : {audit_res.folder_path}")
+        print(f"  Total Files           : {audit_res.total_files}")
+        print(f"  Valid ARC Tasks       : {audit_res.valid_tasks}")
+        print(f"  Malformed Files       : {len(audit_res.malformed_files)}")
+        print(f"  Duplicate Task IDs    : {len(audit_res.duplicate_task_ids)}")
+        print(f"  Invalid Grid Tasks    : {len(audit_res.invalid_grid_tasks)}")
+        print(f"  Missing Test Pairs    : {len(audit_res.missing_test_pairs)}")
+        print("==================================================")
+
+    elif args.command == "submit":
+        from arc_explorer.submission import generate_submission
+        print("==================================================")
+        print(f" GENERATING ARC SUBMISSION FROM: {args.folder}")
+        print("==================================================")
+        sub = generate_submission(args.folder, args.output)
+        print(f"[+] Generated submission containing {len(sub)} tasks -> {args.output}")
+        print("==================================================")
+
+    elif args.command == "validate-submission":
+        from arc_explorer.submission import validate_submission_file
+        print("==================================================")
+        print(f" VALIDATING SUBMISSION FILE: {args.submission}")
+        print("==================================================")
+        is_valid, errors = validate_submission_file(args.tasks, args.submission)
+        if is_valid:
+            print(" VALIDATION SUCCESSFUL! Submission schema is 100% compliant with ARC competition standard.")
+        else:
+            print(f" VALIDATION FAILED ({len(errors)} errors found):")
+            for err in errors[:10]:
+                print(f"  - {err}")
+            if len(errors) > 10:
+                print(f"  ... and {len(errors) - 10} more errors.")
+            sys.exit(1)
+        print("==================================================")
 
     else:
         parser.print_help()
+
 
 
 if __name__ == "__main__":

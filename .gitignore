@@ -44,4 +44,11 @@ reports/*.json
 reports/*.csv
 !reports/*.md
 
+# Competition Submissions & Datasets
+submission.json
+*.submission.json
+data/arc_test/
+data/arc_evaluation/
+
+
 
