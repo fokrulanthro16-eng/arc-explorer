@@ -15,6 +15,17 @@ from arc_explorer.spatial_relation import (
     sort_objects_by_centroid,
     compute_relative_displacement,
 )
+from arc_explorer.symmetry_engine import (
+    detect_mirror_symmetry,
+    apply_mirror_symmetry,
+    detect_rotational_symmetry,
+    reflect_4fold_symmetry,
+    detect_periodic_lattice,
+    tessellate_lattice,
+    complete_missing_region_via_symmetry,
+)
+
+
 
 
 
@@ -379,7 +390,58 @@ class StackObjectsOperator(SymbolicOperator):
         return ObjectCompositionEngine.render_canvas(stacked, (h, w))
 
 
+class MirrorSymmetryOperator(SymbolicOperator):
+    """Applies horizontal or vertical mirror symmetry completion."""
+
+    def __init__(self, axis: str = "horizontal"):
+        super().__init__(f"MirrorSymmetry({axis})", complexity=1.1)
+        self.axis = axis
+
+    def apply(self, grid: List[List[int]]) -> List[List[int]]:
+        return apply_mirror_symmetry(grid, axis=self.axis)
+
+
+class Rotational4FoldSymmetryOperator(SymbolicOperator):
+    """Applies 4-fold rotational symmetry completion across 4 quadrants."""
+
+    def __init__(self):
+        super().__init__("Rotational4FoldSymmetry", complexity=1.2)
+
+    def apply(self, grid: List[List[int]]) -> List[List[int]]:
+        return reflect_4fold_symmetry(grid)
+
+
+class CompleteSymmetryOperator(SymbolicOperator):
+    """Completes missing 0-valued regions using fused mirror and rotational symmetry."""
+
+    def __init__(self):
+        super().__init__("CompleteSymmetry", complexity=1.2)
+
+    def apply(self, grid: List[List[int]]) -> List[List[int]]:
+        return complete_missing_region_via_symmetry(grid)
+
+
+class TessellateLatticeOperator(SymbolicOperator):
+    """Detects repeating unit cell and tessellates periodic lattice pattern."""
+
+    def __init__(self):
+        super().__init__("TessellateLattice", complexity=1.3)
+
+    def apply(self, grid: List[List[int]]) -> List[List[int]]:
+        if not grid or not grid[0]:
+            return grid
+        h, w = len(grid), len(grid[0])
+        cell_dims = detect_periodic_lattice(grid)
+        if not cell_dims:
+            return [list(r) for r in grid]
+
+        ch, cw = cell_dims
+        unit_cell = [grid[r][:cw] for r in range(ch)]
+        return tessellate_lattice(unit_cell, (h, w))
+
+
 class ParameterSynthesisEngine:
+
 
     """Dynamic Parameter Synthesis Engine for ARC transformation operators."""
 
@@ -469,6 +531,13 @@ class ParameterSynthesisEngine:
                     for side_t in ["left", "right", "above", "below"]:
                         candidates.append(PlaceRelativeOperator(t_c, r_c, side=side_t))
 
+        # 6. Global Symmetry Group & Pattern Lattice Engine Operators
+        candidates.append(MirrorSymmetryOperator("horizontal"))
+        candidates.append(MirrorSymmetryOperator("vertical"))
+        candidates.append(Rotational4FoldSymmetryOperator())
+        candidates.append(CompleteSymmetryOperator())
+        candidates.append(TessellateLatticeOperator())
+
         # Deduplicate candidates by name
         unique_candidates: Dict[str, SymbolicOperator] = {}
         for op in candidates:
@@ -476,6 +545,7 @@ class ParameterSynthesisEngine:
                 unique_candidates[op.name] = op
 
         return list(unique_candidates.values())
+
 
 
 
