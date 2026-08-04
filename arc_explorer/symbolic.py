@@ -3,6 +3,20 @@
 from typing import List, Dict, Tuple, Optional, Any, Set
 import copy
 from arc_explorer.object_perception import ObjectPerceptionEngine, ObjectCompositionEngine, ConnectedObject
+from arc_explorer.spatial_relation import (
+    align_to_anchor,
+    place_relative,
+    place_left_of,
+    place_right_of,
+    place_above,
+    place_below,
+    stack_objects,
+    sort_objects_by_area,
+    sort_objects_by_centroid,
+    compute_relative_displacement,
+)
+
+
 
 
 
@@ -281,7 +295,92 @@ class ObjectTransformOperator(SymbolicOperator):
         return ObjectCompositionEngine.render_canvas(transformed_objects, (h, w))
 
 
+class AlignToAnchorOperator(SymbolicOperator):
+    """Aligns target color objects to reference color anchor objects along specified edge."""
+
+    def __init__(self, target_color: int, reference_color: int, edge: str = "top"):
+        super().__init__(f"AlignToAnchor({target_color}->{reference_color},{edge})", complexity=1.3)
+        self.target_color = target_color
+        self.reference_color = reference_color
+        self.edge = edge
+
+    def apply(self, grid: List[List[int]]) -> List[List[int]]:
+        if not grid or not grid[0]:
+            return grid
+        h, w = len(grid), len(grid[0])
+        objects = ObjectPerceptionEngine.detect_objects(grid)
+        targets = [o for o in objects if o.primary_color == self.target_color]
+        refs = [o for o in objects if o.primary_color == self.reference_color]
+        if not targets or not refs:
+            return [list(r) for r in grid]
+
+        ref_obj = refs[0]
+        out_objects: List[ConnectedObject] = []
+        for obj in objects:
+            if obj.primary_color == self.target_color:
+                aligned = align_to_anchor(obj, ref_obj, edge=self.edge)
+                out_objects.append(aligned)
+            else:
+                out_objects.append(obj)
+
+        return ObjectCompositionEngine.render_canvas(out_objects, (h, w))
+
+
+class PlaceRelativeOperator(SymbolicOperator):
+    """Positions target color objects relative to reference color anchor objects."""
+
+    def __init__(self, target_color: int, reference_color: int, side: str = "right", spacing: int = 1):
+        super().__init__(f"PlaceRelative({target_color}->{reference_color},{side})", complexity=1.3)
+        self.target_color = target_color
+        self.reference_color = reference_color
+        self.side = side
+        self.spacing = spacing
+
+    def apply(self, grid: List[List[int]]) -> List[List[int]]:
+        if not grid or not grid[0]:
+            return grid
+        h, w = len(grid), len(grid[0])
+        objects = ObjectPerceptionEngine.detect_objects(grid)
+        targets = [o for o in objects if o.primary_color == self.target_color]
+        refs = [o for o in objects if o.primary_color == self.reference_color]
+        if not targets or not refs:
+            return [list(r) for r in grid]
+
+        ref_obj = refs[0]
+        out_objects: List[ConnectedObject] = []
+        for obj in objects:
+            if obj.primary_color == self.target_color:
+                placed = place_relative(obj, ref_obj, side=self.side, spacing=self.spacing)
+                out_objects.append(placed)
+            else:
+                out_objects.append(obj)
+
+        return ObjectCompositionEngine.render_canvas(out_objects, (h, w))
+
+
+class StackObjectsOperator(SymbolicOperator):
+    """Stacks objects in vertical or horizontal direction."""
+
+    def __init__(self, direction: str = "vertical", spacing: int = 1):
+        super().__init__(f"StackObjects({direction})", complexity=1.4)
+        self.direction = direction
+        self.spacing = spacing
+
+    def apply(self, grid: List[List[int]]) -> List[List[int]]:
+        if not grid or not grid[0]:
+            return grid
+        h, w = len(grid), len(grid[0])
+        objects = ObjectPerceptionEngine.detect_objects(grid)
+        if not objects:
+            return [list(r) for r in grid]
+
+        sorted_objs = sort_objects_by_area(objects, reverse=True)
+        stacked = stack_objects(sorted_objs, direction=self.direction, spacing=self.spacing)
+        return ObjectCompositionEngine.render_canvas(stacked, (h, w))
+
+
 class ParameterSynthesisEngine:
+
     """Dynamic Parameter Synthesis Engine for ARC transformation operators."""
 
     @staticmethod
@@ -355,9 +454,20 @@ class ParameterSynthesisEngine:
                     if dr != 0 or dc != 0:
                         candidates.append(SpatialTranslateOperator(dr, dc))
 
-        # 5. Infer Region Infill Colors
+        # 5. Infer Region Infill Colors & Spatial Relational Operators
         for fill in [2, 3, 8]:
             candidates.append(RegionInfillOperator(fill))
+
+        for dir_t in ["vertical", "horizontal"]:
+            candidates.append(StackObjectsOperator(direction=dir_t))
+
+        for t_c in [1, 2, 3, 4, 5]:
+            for r_c in [1, 2, 3, 4, 5]:
+                if t_c != r_c:
+                    for edge_t in ["top", "bottom", "left", "right", "center"]:
+                        candidates.append(AlignToAnchorOperator(t_c, r_c, edge=edge_t))
+                    for side_t in ["left", "right", "above", "below"]:
+                        candidates.append(PlaceRelativeOperator(t_c, r_c, side=side_t))
 
         # Deduplicate candidates by name
         unique_candidates: Dict[str, SymbolicOperator] = {}
@@ -366,6 +476,7 @@ class ParameterSynthesisEngine:
                 unique_candidates[op.name] = op
 
         return list(unique_candidates.values())
+
 
 
 
