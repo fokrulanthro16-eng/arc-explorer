@@ -18,6 +18,7 @@ def compute_path_actions(
     start_pos: Tuple[int, int],
     target_pos: Tuple[int, int],
     grid: Tuple[Tuple[int, ...], ...],
+    has_gray_walls: bool = False,
 ) -> List[Action]:
     """Computes cardinal movement action sequence from start_pos to target_pos avoiding obstacles."""
     if start_pos == target_pos:
@@ -43,12 +44,13 @@ def compute_path_actions(
         for (dr, dc), act in deltas:
             nr, nc = r + dr, c + dc
             if 0 <= nr < h and 0 <= nc < w:
-                if grid[nr][nc] != 5:  # Avoid Color.GRAY wall
+                if not (has_gray_walls and grid[nr][nc] == 5):
                     if (nr, nc) not in visited:
                         visited.add((nr, nc))
                         queue.append(((nr, nc), path + [act]))
 
     return []
+
 
 
 class SafePlanner:
@@ -96,10 +98,12 @@ class SafePlanner:
         discrepancies.sort(key=lambda x: x[0])
         _, target_pos = discrepancies[0]
 
-        path_actions = compute_path_actions(obs.agent_pos, target_pos, current_grid)
+        has_walls = obs.info.get("has_gray_walls", False)
+        path_actions = compute_path_actions(obs.agent_pos, target_pos, current_grid, has_gray_walls=has_walls)
         full_sequence = path_actions + [Action.INTERACT]
         goal = MacroGoal(target_pos, Action.INTERACT, f"Target cell {target_pos}")
         return goal, full_sequence
+
 
     def select_action(
         self, obs: Observation, tracker: HypothesisTracker, visited_positions: List[Tuple[int, int]]
@@ -118,16 +122,25 @@ class SafePlanner:
         for action in all_actions:
             max_hazard_prob = 0.0
             for hyp in rankings:
-                if hyp.score > 0.1:
+                if hyp.score >= self.hazard_threshold:
                     _, pred_hazard = hyp.predict(obs, action)
                     if pred_hazard:
                         max_hazard_prob = max(max_hazard_prob, hyp.score)
 
+
             if action in [Action.MOVE_UP, Action.MOVE_DOWN, Action.MOVE_LEFT, Action.MOVE_RIGHT]:
                 dr, dc = {"MOVE_UP": (-1, 0), "MOVE_DOWN": (1, 0), "MOVE_LEFT": (0, -1), "MOVE_RIGHT": (0, 1)}[action.value]
-                target_cell = obs.get_cell(obs.agent_pos[0] + dr, obs.agent_pos[1] + dc)
-                if target_cell == 5:  # Color.GRAY wall
+                nr, nc = obs.agent_pos[0] + dr, obs.agent_pos[1] + dc
+                is_arc_task = obs.info.get("target_output_grid") is not None
+                if not (0 <= nr < obs.height and 0 <= nc < obs.width):
                     max_hazard_prob = 1.0
+                else:
+                    target_cell = obs.get_cell(nr, nc)
+                    if not is_arc_task and target_cell == 5:
+                        max_hazard_prob = 1.0
+
+
+
 
             is_safe = max_hazard_prob < self.hazard_threshold
             action_safety[action.value] = is_safe

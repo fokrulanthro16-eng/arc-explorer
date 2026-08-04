@@ -64,14 +64,16 @@ class DefaultPhysicsHypothesis(BaseHypothesis):
         self, obs: Observation, action: Action
     ) -> Tuple[List[List[int]], bool]:
         grid = [list(row) for row in obs.grid]
+        is_arc_task = obs.info.get("target_output_grid") is not None
         if action in ACTION_DELTAS:
             dr, dc = ACTION_DELTAS[action]
             nr, nc = obs.agent_pos[0] + dr, obs.agent_pos[1] + dc
             if 0 <= nr < obs.height and 0 <= nc < obs.width:
                 target_cell = obs.grid[nr][nc]
-                if target_cell == Color.GRAY or target_cell == Color.GREEN:
-                    # Gray wall or un-triggered hazard barrier
+                if not is_arc_task and (target_cell == Color.GRAY or target_cell == Color.GREEN):
+                    # Gray wall or un-triggered hazard barrier in custom scenarios
                     return grid, True
+
         return grid, False
 
 
@@ -91,6 +93,7 @@ class ColorShiftPropagationHypothesis(BaseHypothesis):
     ) -> Tuple[List[List[int]], bool]:
         grid = [list(row) for row in obs.grid]
         hazard = False
+        is_arc_task = obs.info.get("target_output_grid") is not None
 
         if action in ACTION_DELTAS:
             dr, dc = ACTION_DELTAS[action]
@@ -110,7 +113,7 @@ class ColorShiftPropagationHypothesis(BaseHypothesis):
                     # BLUE reflects across vertical axis
                     grid[nr][nc] = Color.EMPTY
                     grid[obs.height - 1 - nr][nc] = Color.BLUE
-                elif target_color == Color.GRAY:
+                elif not is_arc_task and target_color == Color.GRAY:
                     hazard = True
 
         return grid, hazard
@@ -132,6 +135,7 @@ class TriggerBarrierHypothesis(BaseHypothesis):
     ) -> Tuple[List[List[int]], bool]:
         grid = [list(row) for row in obs.grid]
         hazard = False
+        is_arc_task = obs.info.get("target_output_grid") is not None
 
         r, c = obs.agent_pos
 
@@ -149,10 +153,12 @@ class TriggerBarrierHypothesis(BaseHypothesis):
             dr, dc = ACTION_DELTAS[action]
             nr, nc = r + dr, c + dc
             if 0 <= nr < obs.height and 0 <= nc < obs.width:
-                if obs.grid[nr][nc] == Color.GREEN:
+                if not is_arc_task and obs.grid[nr][nc] == Color.GREEN:
                     hazard = True  # Crossing locked barrier yields hazard
 
         return grid, hazard
+
+
 
 
 # --- Scenario 3 Hypotheses: Axial Pattern Completion ---

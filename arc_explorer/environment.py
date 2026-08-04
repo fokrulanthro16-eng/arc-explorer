@@ -141,7 +141,11 @@ class GridWorld:
         self.done = False
         self.state_vars = {}
         self.last_action = None
-        return self._make_observation(last_reward=0.0, hazard_alert=False)
+        initial_info = {}
+        if hasattr(self.rule, "target_output_grid"):
+            initial_info["target_output_grid"] = getattr(self.rule, "target_output_grid")
+        return self._make_observation(last_reward=0.0, hazard_alert=False, info=initial_info)
+
 
     def step(self, action: Action) -> Observation:
         if self.done:
