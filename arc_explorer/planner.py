@@ -17,10 +17,14 @@ class SafePlanner:
         self.hazard_threshold = hazard_threshold
         self.safety_weight = safety_weight
         self.novelty_weight = novelty_weight
+        self.action_history: List[Tuple[Tuple[int, int], Action]] = []
 
     def select_action(
         self, obs: Observation, tracker: HypothesisTracker, visited_positions: List[Tuple[int, int]]
     ) -> Tuple[Action, Dict[str, Any]]:
+        if obs.step == 1 or len(visited_positions) <= 1:
+            self.action_history.clear()
+
         rankings = tracker.get_rankings()
         all_actions = list(Action)
 
@@ -65,11 +69,18 @@ class SafePlanner:
                 r, c = obs.agent_pos
                 current_color = obs.get_cell(r, c)
                 adj_colors = [obs.get_cell(r + dr, c + dc) for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]]
+                action_pos_count = sum(1 for p, a in self.action_history if p == (r, c) and a == action)
+
                 if current_color not in [0, 5] or any(c not in [0, 5] for c in adj_colors):
-                    novelty = 1.5
-                # Decay novelty if agent repeatedly INTERACTs on same state
-                if obs.last_action == action and obs.info.get("no_change", False):
-                    novelty = 0.0
+                    novelty = 1.5 / (1.0 + action_pos_count)
+
+                # Zero out novelty for interactions at positions where no change occurred
+                if obs.info.get("no_change", False) and obs.last_action in [Action.INTERACT, Action.INSPECT]:
+                    last_pos = self.action_history[-1][0] if self.action_history else None
+                    if last_pos == (r, c):
+                        novelty = 0.0
+
+
 
 
 
@@ -92,7 +103,7 @@ class SafePlanner:
         if best_action is None:
             best_action = candidate_actions[0]
 
-
+        self.action_history.append((obs.agent_pos, best_action))
 
         plan_info = {
             "selected_action": best_action.value,
@@ -101,3 +112,4 @@ class SafePlanner:
             "action_safety": action_safety,
         }
         return best_action, plan_info
+

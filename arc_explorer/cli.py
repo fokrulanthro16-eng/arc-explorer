@@ -97,6 +97,21 @@ def main():
     # 'benchmark' subcommand
     subparsers.add_parser("benchmark", help="Run all 3 scenarios and display baseline benchmark report")
 
+    # 'evaluate' subcommand
+    eval_parser = subparsers.add_parser("evaluate", help="Batch evaluate ARC JSON tasks in a folder")
+    eval_parser.add_argument(
+        "--folder",
+        type=str,
+        default="samples",
+        help="Path to folder containing ARC JSON task files",
+    )
+    eval_parser.add_argument(
+        "--output",
+        type=str,
+        default="reports",
+        help="Output directory to save evaluation JSON and CSV reports",
+    )
+
     args = parser.parse_args()
 
     if args.command == "run":
@@ -133,6 +148,38 @@ def main():
         print("--------------------------------------------------")
         print(f"Overall Baseline Benchmark Score: {avg_score:.2f} / 100.0")
         print("==================================================")
+
+    elif args.command == "evaluate":
+        from arc_explorer.evaluator import BatchEvaluator
+        print("==================================================")
+        print(f" BATCH EVALUATING ARC TASKS IN: {args.folder}")
+        print("==================================================")
+
+        def print_progress(idx, total, fname):
+            print(f"[{idx}/{total}] Processing task file: {fname}...")
+
+        report = BatchEvaluator.evaluate_folder(
+            folder_path=args.folder, progress_callback=print_progress
+        )
+
+        json_path = report.export_json(output_dir=args.output)
+        csv_path = report.export_csv(output_dir=args.output)
+
+        print("--------------------------------------------------")
+        print("BATCH EVALUATION SUMMARY METRICS:")
+        print(f"  Total Tasks Evaluated : {report.total_tasks}")
+        print(f"  Completed Tasks       : {report.completed_tasks}")
+        print(f"  Failed Tasks          : {report.failed_tasks}")
+        print(f"  Exact Matches         : {report.exact_matches}")
+        print(f"  Exact-Match Accuracy  : {report.exact_match_pct:.2f}%")
+        print(f"  Average Runtime       : {report.avg_runtime_sec:.4f}s")
+        print(f"  Median Runtime        : {report.median_runtime_sec:.4f}s")
+        print(f"  Total Runtime         : {report.total_runtime_sec:.4f}s")
+        print("--------------------------------------------------")
+        print(f"[+] Exported JSON report: {json_path}")
+        print(f"[+] Exported CSV summary: {csv_path}")
+        print("==================================================")
+
 
     else:
         parser.print_help()

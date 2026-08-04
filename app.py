@@ -6,6 +6,7 @@ from arc_explorer.agent import ExplorerAgent
 from arc_explorer.scenarios import create_scenario_1, create_scenario_2, create_scenario_3
 from arc_explorer.replay import ReplayLogger
 from arc_explorer.arc_task import ARCTask, create_arc_task_environment
+from arc_explorer.evaluator import BatchEvaluator, BatchEvalReport
 from arc_explorer.ui_helpers import (
     render_grid_html,
     run_benchmark_evaluation,
@@ -28,6 +29,8 @@ def init_session_state():
         st.session_state.loaded_replay = None
     if "replay_step_idx" not in st.session_state:
         st.session_state.replay_step_idx = 0
+    if "batch_report" not in st.session_state:
+        st.session_state.batch_report = None
 
 
 def reset_ui_state():
@@ -37,6 +40,7 @@ def reset_ui_state():
     st.session_state.benchmark_data = None
     st.session_state.loaded_replay = None
     st.session_state.replay_step_idx = 0
+    st.session_state.batch_report = None
 
 
 def main():
@@ -128,12 +132,14 @@ def main():
         st.success("Benchmark evaluation completed! Check the 📈 **Benchmark View** tab.")
 
     # Main Tabs
-    tab_exp, tab_bench, tab_replay, tab_arc = st.tabs([
+    tab_exp, tab_bench, tab_replay, tab_arc, tab_batch = st.tabs([
         "🔬 Exploration View",
         "📈 Benchmark View",
         "📜 Replay View",
         "🧩 ARC Tasks View",
+        "⚡ Batch Evaluation",
     ])
+
 
 
     # --- TAB 1: EXPLORATION VIEW ---
@@ -464,8 +470,152 @@ def main():
                 except Exception as e:
                     st.error(f"Error executing exploration on ARC task: {e}")
 
+    # --- TAB 5: BATCH EVALUATION ---
+    with tab_batch:
+        st.subheader("⚡ ARC Task Batch Evaluation Engine")
+        st.caption("Evaluate all ARC JSON tasks in a specified folder, compute exact-match accuracy, and export reports.")
+
+        col_f_in, col_f_btn = st.columns([3, 1])
+        with col_f_in:
+            batch_folder_input = st.text_input("Folder Path to Batch Evaluate", value="samples")
+        with col_f_btn:
+            st.write("")
+            st.write("")
+            run_batch_eval_btn = st.button("🚀 Run Batch Evaluation", use_container_width=True)
+
+        if run_batch_eval_btn:
+            if not os.path.exists(batch_folder_input):
+                st.error(f"Folder not found: `{batch_folder_input}`")
+            else:
+                progress_bar = st.progress(0.0)
+                status_text = st.empty()
+
+                def ui_progress(idx, total, filename):
+                    progress_bar.progress(idx / max(1, total))
+                    status_text.write(f"Evaluating task [{idx}/{total}]: `{filename}`...")
+
+                try:
+                    report = BatchEvaluator.evaluate_folder(
+                        folder_path=batch_folder_input,
+                        max_steps=max_steps,
+                        progress_callback=ui_progress,
+                    )
+
+                    json_report_path = report.export_json(output_dir="reports")
+                    csv_report_path = report.export_csv(output_dir="reports")
+
+                    st.session_state.batch_report = {
+                        "report_obj": report,
+                        "json_path": json_report_path,
+                        "csv_path": csv_report_path,
+                    }
+                    progress_bar.progress(1.0)
+                    status_text.success("Batch evaluation completed! Reports exported to `reports/` folder.")
+                except Exception as e:
+                    st.error(f"Error during batch evaluation: {e}")
+
+        if st.session_state.batch_report:
+            b_info = st.session_state.batch_report
+            report: BatchEvalReport = b_info["report_obj"]
+
+            st.markdown("---")
+            st.markdown("### Summary Metrics")
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Exact-Match Accuracy", f"{report.exact_match_pct:.2f}%")
+            m2.metric("Exact Matches", f"{report.exact_matches} / {report.total_tasks}")
+            m3.metric("Completed Tasks", f"{report.completed_tasks} / {report.total_tasks}")
+            m4.metric("Failed / Error Tasks", report.failed_tasks)
+
+            m5, m6, m7 = st.columns(3)
+            m5.metric("Average Runtime", f"{report.avg_runtime_sec:.4f}s")
+            m6.metric("Median Runtime", f"{report.median_runtime_sec:.4f}s")
+            m7.metric("Total Runtime", f"{report.total_runtime_sec:.4f}s")
+
+            # Report Download Buttons
+            st.markdown("#### Exported Reports")
+            col_dl1, col_dl2 = st.columns(2)
+
+            if os.path.exists(b_info["csv_path"]) and os.path.exists(b_info["json_path"]):
+                with open(b_info["csv_path"], "r", encoding="utf-8") as f_csv:
+                    csv_data = f_csv.read()
+                with open(b_info["json_path"], "r", encoding="utf-8") as f_json:
+                    json_data = f_json.read()
+
+                with col_dl1:
+                    st.download_button(
+                        label="📥 Download CSV Summary Report",
+                        data=csv_data,
+                        file_name=os.path.basename(b_info["csv_path"]),
+                        mime="text/csv",
+                        use_container_width=True,
+                    )
+
+                with col_dl2:
+                    st.download_button(
+                        label="📥 Download JSON Full Report",
+                        data=json_data,
+                        file_name=os.path.basename(b_info["json_path"]),
+                        mime="application/json",
+                        use_container_width=True,
+                    )
+
+            st.markdown("---")
+            st.markdown("### Task Results Data Table")
+
+            show_failed_only = st.checkbox("Filter: Show Failed / Error Tasks Only")
+
+            filtered_results = report.task_results
+            if show_failed_only:
+                filtered_results = [r for r in report.task_results if r.status in ["FAILED", "ERROR"] or not r.exact_match]
+
+            table_data = []
+            for r in filtered_results:
+                table_data.append({
+                    "Task ID": r.task_id,
+                    "Filename": r.filename,
+                    "Status": r.status,
+                    "Prediction": "YES" if r.prediction_available else "NO",
+                    "Exact Match": "✅ TRUE" if r.exact_match else "❌ FALSE",
+                    "Runtime (s)": r.runtime_sec,
+                    "Discovery Score": r.discovery_score,
+                    "Inferred Rule": r.inferred_rule_name,
+                    "Failure Reason": r.failure_reason if r.failure_reason else "-",
+                })
+
+            st.dataframe(table_data, use_container_width=True, hide_index=True)
+
+            # Task Detail Inspector
+            st.markdown("---")
+            st.markdown("### Task Grid Inspector")
+            task_options = [r.task_id for r in report.task_results]
+            if task_options:
+                selected_task_id = st.selectbox("Select Task to Inspect Grids", options=task_options)
+                selected_task_res = next((r for r in report.task_results if r.task_id == selected_task_id), None)
+
+                if selected_task_res:
+                    st.write(
+                        f"**Task ID**: `{selected_task_res.task_id}` | "
+                        f"**Status**: `{selected_task_res.status}` | "
+                        f"**Exact Match**: `{selected_task_res.exact_match}`"
+                    )
+                    col_p_grid, col_e_grid = st.columns(2)
+                    with col_p_grid:
+                        st.caption("Predicted Output Grid")
+                        if selected_task_res.predicted_grid:
+                            st.components.v1.html(render_grid_html(selected_task_res.predicted_grid, (0, 0)), height=320)
+                        else:
+                            st.info("No predicted grid available.")
+
+                    with col_e_grid:
+                        st.caption("Expected Target Grid")
+                        if selected_task_res.expected_grid:
+                            st.components.v1.html(render_grid_html(selected_task_res.expected_grid, (0, 0)), height=320)
+                        else:
+                            st.info("No expected target grid available.")
+
 
 if __name__ == "__main__":
     main()
+
 
 

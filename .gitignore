@@ -38,5 +38,7 @@ ENV/
 *.swp
 *.swo
 
-# Replays / Logs output
+# Replays / Logs / Reports output
 replays/*.json
+reports/
+

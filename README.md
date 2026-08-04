@@ -156,17 +156,25 @@ Load and format a saved JSON reasoning trace:
 python -m arc_explorer.cli replay --file replays/scenario_1.json
 ```
 
-### 3. Run Benchmark Suite
+### 3. Run Batch Evaluation on ARC Tasks
+Batch evaluate all ARC JSON task files in a folder and export CSV/JSON reports:
+```bash
+python -m arc_explorer.cli evaluate --folder samples --output reports
+```
+This runs every ARC task in `samples/`, computes exact-match accuracy, average and median runtimes, and writes structured reports to `reports/arc_batch_eval_<timestamp>.csv` and `reports/arc_batch_eval_<timestamp>.json`.
+
+### 4. Run Benchmark Suite
 Run the full benchmark evaluation across all 3 scenarios:
 ```bash
 python -m arc_explorer.cli benchmark
 ```
 
-### 4. Run Test Suite
+### 5. Run Test Suite
 Execute unit and integration tests with `pytest`:
 ```bash
 python -m pytest -v
 ```
+
 
 ---
 
