@@ -8,6 +8,8 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional, Callable, Tuple
 from arc_explorer.arc_task import ARCTask, create_arc_task_environment
 from arc_explorer.agent import ExplorerAgent
+from arc_explorer.symbolic import SymbolicHypothesisGraph
+
 
 
 class TaskEvalResult:
@@ -194,6 +196,10 @@ class BatchEvaluator:
             )
 
         try:
+            # 1. Build & Evaluate Symbolic Hypothesis Graph on all training pairs
+            graph = SymbolicHypothesisGraph()
+            best_hyp = graph.build_and_evaluate(task.train_pairs)
+
             env = create_arc_task_environment(task, pair_type="train", index=0, max_steps=max_steps)
             agent = ExplorerAgent()
             result = agent.run_exploration(env, max_steps=max_steps)
@@ -212,6 +218,22 @@ class BatchEvaluator:
                 f"Hazards hit: {result['hazard_count']}" if result["hazard_count"] > 0 else "Exact grid match not achieved"
             )
 
+            # Export symbolic reasoning trace for solved task
+            if exact_match and graph.solved_trace:
+                os.makedirs("replays", exist_ok=True)
+                trace_file = os.path.join("replays", f"symbolic_trace_{task.task_id}.json")
+                with open(trace_file, "w", encoding="utf-8") as tf:
+                    json.dump({
+                        "task_id": task.task_id,
+                        "exact_match": exact_match,
+                        "symbolic_trace": graph.solved_trace,
+                        "trace_logs": best_hyp.trace_logs,
+                    }, tf, indent=2)
+
+            inferred_id = best_hyp.hyp_id if best_hyp else result["inferred_rule_id"]
+            inferred_name = best_hyp.name if best_hyp else result["inferred_rule_name"]
+            score = 100.0 if exact_match else result["discovery_score"]
+
             return TaskEvalResult(
                 task_id=task.task_id,
                 filename=filename,
@@ -220,12 +242,13 @@ class BatchEvaluator:
                 exact_match=exact_match,
                 runtime_sec=runtime,
                 failure_reason=failure_reason,
-                inferred_rule_id=result["inferred_rule_id"],
-                inferred_rule_name=result["inferred_rule_name"],
-                discovery_score=result["discovery_score"],
+                inferred_rule_id=inferred_id,
+                inferred_rule_name=inferred_name,
+                discovery_score=score,
                 predicted_grid=predicted_grid,
                 expected_grid=expected_grid,
             )
+
 
         except Exception as e:
             return TaskEvalResult(
