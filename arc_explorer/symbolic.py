@@ -1,4 +1,4 @@
-"""Symbolic Hypothesis Graph Reasoning Engine & N-depth DAG Planner for ARC-AGI tasks."""
+"""Symbolic Hypothesis Graph Reasoning Engine, N-depth DAG Planner & Parameter Synthesis Engine for ARC-AGI tasks."""
 
 from typing import List, Dict, Tuple, Optional, Any, Set
 import copy
@@ -49,7 +49,7 @@ class BoundingBoxCropOperator(SymbolicOperator):
 
 
 class BlockScaleOperator(SymbolicOperator):
-    """2x2 block scaling expansion."""
+    """Block scaling expansion by factor scale_factor."""
 
     def __init__(self, scale_factor: int = 2):
         super().__init__(f"BlockScale{scale_factor}x", complexity=1.0)
@@ -71,7 +71,7 @@ class BlockScaleOperator(SymbolicOperator):
 
 
 class TileReplicationOperator(SymbolicOperator):
-    """Matrix tile repeat (2x2 repeat)."""
+    """Matrix tile repeat (repeat_r x repeat_c)."""
 
     def __init__(self, repeat_r: int = 2, repeat_c: int = 2):
         super().__init__(f"TileRepeat{repeat_r}x{repeat_c}", complexity=1.0)
@@ -100,34 +100,84 @@ class ColorMapOperator(SymbolicOperator):
         return [[self.mapping.get(cell, cell) for cell in row] for row in grid]
 
 
-class HorizontalReflectionOperator(SymbolicOperator):
-    """Horizontal mirror reflection across vertical axis."""
+class RotationOperator(SymbolicOperator):
+    """Matrix rotation for angle in [90, 180, 270] degrees."""
 
-    def __init__(self):
-        super().__init__("HorizontalReflection", complexity=1.0)
-
-    def apply(self, grid: List[List[int]]) -> List[List[int]]:
-        return [list(reversed(row)) for row in grid]
-
-
-class VerticalReflectionOperator(SymbolicOperator):
-    """Vertical flip across horizontal axis."""
-
-    def __init__(self):
-        super().__init__("VerticalReflection", complexity=1.0)
+    def __init__(self, angle: int = 90):
+        super().__init__(f"Rotation{angle}", complexity=1.0 if angle == 180 else 1.1)
+        self.angle = angle
 
     def apply(self, grid: List[List[int]]) -> List[List[int]]:
-        return [list(row) for row in reversed(grid)]
+        if not grid or not grid[0]:
+            return grid
+        if self.angle == 90:
+            # 90 deg clockwise
+            return [list(row) for row in zip(*reversed(grid))]
+        elif self.angle == 180:
+            # 180 deg rotation
+            return [list(reversed(row)) for row in reversed(grid)]
+        elif self.angle == 270:
+            # 270 deg clockwise (90 deg counter-clockwise)
+            return [list(row) for row in reversed(list(zip(*grid)))]
+        return [list(r) for r in grid]
 
 
-class Rotation180Operator(SymbolicOperator):
-    """180-degree matrix rotation."""
+class Rotation180Operator(RotationOperator):
+    """Backward-compatible 180-degree matrix rotation."""
 
     def __init__(self):
-        super().__init__("Rotation180", complexity=1.1)
+        super().__init__(180)
+        self.name = "Rotation180"
+
+
+class ReflectionOperator(SymbolicOperator):
+    """Axis reflection operator for axis in ['horizontal', 'vertical', 'main_diagonal', 'anti_diagonal']."""
+
+    def __init__(self, axis: str = "horizontal"):
+        super().__init__(f"Reflection({axis})", complexity=1.0)
+        self.axis = axis
 
     def apply(self, grid: List[List[int]]) -> List[List[int]]:
-        return [list(reversed(row)) for row in reversed(grid)]
+        if not grid or not grid[0]:
+            return grid
+        if self.axis == "horizontal":
+            return [list(reversed(row)) for row in grid]
+        elif self.axis == "vertical":
+            return [list(row) for row in reversed(grid)]
+        elif self.axis == "main_diagonal":
+            return [list(row) for row in zip(*grid)]
+        elif self.axis == "anti_diagonal":
+            return [list(reversed(r)) for r in reversed(list(zip(*grid)))]
+        return [list(r) for r in grid]
+
+
+
+class HorizontalReflectionOperator(ReflectionOperator):
+    """Backward-compatible horizontal mirror reflection."""
+
+    def __init__(self):
+        super().__init__("horizontal")
+        self.name = "HorizontalReflection"
+
+
+class VerticalReflectionOperator(ReflectionOperator):
+    """Backward-compatible vertical flip."""
+
+    def __init__(self):
+        super().__init__("vertical")
+        self.name = "VerticalReflection"
+
+
+class ObjectMaskOperator(SymbolicOperator):
+    """Applies object mask replacement for target_color -> fill_color."""
+
+    def __init__(self, target_color: int, fill_color: int):
+        super().__init__(f"ObjectMask({target_color}->{fill_color})", complexity=1.1)
+        self.target_color = target_color
+        self.fill_color = fill_color
+
+    def apply(self, grid: List[List[int]]) -> List[List[int]]:
+        return [[self.fill_color if cell == self.target_color else cell for cell in row] for row in grid]
 
 
 class SpatialTranslateOperator(SymbolicOperator):
@@ -190,6 +240,91 @@ class LineExtendOperator(SymbolicOperator):
                 color = row_colors[0]
                 out[r] = [color] * w
         return out
+
+
+class ParameterSynthesisEngine:
+    """Dynamic Parameter Synthesis Engine for ARC transformation operators."""
+
+    @staticmethod
+    def infer_parameters(train_pairs: List[Any]) -> List[SymbolicOperator]:
+        """Dynamically infers candidate parameters from train pairs and ranks them by confidence."""
+        candidates: List[SymbolicOperator] = [
+            IdentityOperator(),
+            BoundingBoxCropOperator(),
+            LineExtendOperator(),
+        ]
+
+        if not train_pairs:
+            return candidates
+
+        # 1. Infer Grid Dimensions & Scale Factors
+        for pair in train_pairs:
+            in_g, out_g = pair.input_grid, pair.output_grid
+            h_in, w_in = len(in_g), len(in_g[0])
+            h_out, w_out = len(out_g), len(out_g[0])
+
+            if h_out > 0 and w_out > 0 and h_in > 0 and w_in > 0:
+                if h_out % h_in == 0 and w_out % w_in == 0:
+                    scale_r = h_out // h_in
+                    scale_c = w_out // w_in
+                    if scale_r == scale_c and scale_r in [2, 3]:
+                        candidates.append(BlockScaleOperator(scale_r))
+                    candidates.append(TileReplicationOperator(scale_r, scale_c))
+
+        # 2. Infer Rotation Angles & Reflection Axes
+        candidates.append(Rotation180Operator())
+        for angle in [90, 270]:
+            candidates.append(RotationOperator(angle))
+        candidates.append(HorizontalReflectionOperator())
+        candidates.append(VerticalReflectionOperator())
+        for axis in ["main_diagonal", "anti_diagonal"]:
+            candidates.append(ReflectionOperator(axis))
+
+        # 3. Infer Color Substitution Maps
+        color_maps: Dict[int, int] = {}
+        for pair in train_pairs:
+            in_g, out_g = pair.input_grid, pair.output_grid
+            if len(in_g) == len(out_g) and len(in_g[0]) == len(out_g[0]):
+                for r in range(len(in_g)):
+                    for c in range(len(in_g[0])):
+                        if in_g[r][c] != out_g[r][c]:
+                            color_maps[in_g[r][c]] = out_g[r][c]
+
+            in_colors = set(c for r in in_g for c in r if c != 0)
+            out_colors = set(c for r in out_g for c in r if c != 0)
+            diff_in = in_colors - out_colors
+            diff_out = out_colors - in_colors
+            if len(diff_in) == 1 and len(diff_out) == 1:
+                color_maps[list(diff_in)[0]] = list(diff_out)[0]
+
+        if color_maps:
+            candidates.append(ColorMapOperator(color_maps))
+            for k, v in color_maps.items():
+                candidates.append(ObjectMaskOperator(k, v))
+
+        # 4. Infer Spatial Translation Vectors
+        for pair in train_pairs:
+            in_g, out_g = pair.input_grid, pair.output_grid
+            if len(in_g) == len(out_g) and len(in_g[0]) == len(out_g[0]):
+                in_nz = [(r, c) for r in range(len(in_g)) for c in range(len(in_g[0])) if in_g[r][c] != 0]
+                out_nz = [(r, c) for r in range(len(out_g)) for c in range(len(out_g[0])) if out_g[r][c] != 0]
+                if in_nz and out_nz:
+                    dr = out_nz[0][0] - in_nz[0][0]
+                    dc = out_nz[0][1] - in_nz[0][1]
+                    if dr != 0 or dc != 0:
+                        candidates.append(SpatialTranslateOperator(dr, dc))
+
+        # 5. Infer Region Infill Colors
+        for fill in [2, 3, 8]:
+            candidates.append(RegionInfillOperator(fill))
+
+        # Deduplicate candidates by name
+        unique_candidates: Dict[str, SymbolicOperator] = {}
+        for op in candidates:
+            if op.name not in unique_candidates:
+                unique_candidates[op.name] = op
+
+        return list(unique_candidates.values())
 
 
 class SymbolicHypothesis:
@@ -318,62 +453,14 @@ class SymbolicDAGPlanner:
 
 
 class SymbolicHypothesisGraph:
-    """Symbolic Hypothesis Graph for generating, scoring, and executing general ARC rules via N-depth DAG search."""
+    """Symbolic Hypothesis Graph for generating, scoring, and executing general ARC rules via N-depth DAG search & Parameter Synthesis."""
 
     def __init__(self):
         self.hypotheses: List[SymbolicHypothesis] = []
         self.solved_trace: Optional[Dict[str, Any]] = None
 
     def _generate_candidate_operators(self, train_pairs: List[Any]) -> List[SymbolicOperator]:
-        candidates: List[SymbolicOperator] = [
-            IdentityOperator(),
-            BoundingBoxCropOperator(),
-            BlockScaleOperator(2),
-            TileReplicationOperator(2, 2),
-            HorizontalReflectionOperator(),
-            VerticalReflectionOperator(),
-            Rotation180Operator(),
-            LineExtendOperator(),
-        ]
-
-        # Extract color mappings from train pairs
-        color_maps: Dict[int, int] = {}
-        for pair in train_pairs:
-            in_g, out_g = pair.input_grid, pair.output_grid
-            if len(in_g) == len(out_g) and len(in_g[0]) == len(out_g[0]):
-                for r in range(len(in_g)):
-                    for c in range(len(in_g[0])):
-                        if in_g[r][c] != out_g[r][c]:
-                            color_maps[in_g[r][c]] = out_g[r][c]
-
-            in_colors = set(c for r in in_g for c in r if c != 0)
-            out_colors = set(c for r in out_g for c in r if c != 0)
-            diff_in = in_colors - out_colors
-            diff_out = out_colors - in_colors
-            if len(diff_in) == 1 and len(diff_out) == 1:
-                color_maps[list(diff_in)[0]] = list(diff_out)[0]
-
-        if color_maps:
-            candidates.append(ColorMapOperator(color_maps))
-
-
-        # Spatial translation candidates
-        for pair in train_pairs:
-            in_g, out_g = pair.input_grid, pair.output_grid
-            if len(in_g) == len(out_g) and len(in_g[0]) == len(out_g[0]):
-                in_nz = [(r, c) for r in range(len(in_g)) for c in range(len(in_g[0])) if in_g[r][c] != 0]
-                out_nz = [(r, c) for r in range(len(out_g)) for c in range(len(out_g[0])) if out_g[r][c] != 0]
-                if in_nz and out_nz:
-                    dr = out_nz[0][0] - in_nz[0][0]
-                    dc = out_nz[0][1] - in_nz[0][1]
-                    if dr != 0 or dc != 0:
-                        candidates.append(SpatialTranslateOperator(dr, dc))
-
-        # Region infill candidates
-        for fill in [2, 3, 8]:
-            candidates.append(RegionInfillOperator(fill))
-
-        return candidates
+        return ParameterSynthesisEngine.infer_parameters(train_pairs)
 
     def build_and_evaluate(self, train_pairs: List[Any], max_depth: int = 4) -> SymbolicHypothesis:
         """Builds symbolic hypothesis graph, performs N-depth DAG search, and returns optimal consistent hypothesis."""
