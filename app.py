@@ -422,6 +422,22 @@ def main():
                     else:
                         st.caption("No target output provided.")
 
+            # Display Test Pairs if present
+            if arc_task.test_pairs:
+                st.markdown("#### Test Examples")
+                for idx, pair in enumerate(arc_task.test_pairs):
+                    st.markdown(f"**Test Pair #{idx + 1}**")
+                    col_in, col_out = st.columns(2)
+                    with col_in:
+                        st.caption("Test Input Grid")
+                        st.components.v1.html(render_grid_html(pair.input_grid, (0, 0)), height=320)
+                    with col_out:
+                        st.caption("Target Test Output Grid")
+                        if pair.output_grid:
+                            st.components.v1.html(render_grid_html(pair.output_grid, (0, 0)), height=320)
+                        else:
+                            st.info("Hidden Test Output")
+
             # Convert to GridWorld & Explore button
             if st.button(f"🚀 Convert & Explore Task ({arc_task.task_id})", use_container_width=True):
                 try:
@@ -451,4 +467,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 

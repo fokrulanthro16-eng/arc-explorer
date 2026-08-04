@@ -113,8 +113,9 @@ def list_available_arc_tasks(samples_dir: str = "samples") -> List[str]:
     return [
         os.path.join(samples_dir, f)
         for f in sorted(os.listdir(samples_dir))
-        if f.endswith(".json") and "arc_task" in f
+        if f.endswith(".json")
     ]
+
 
 
 def load_and_verify_replay(filepath: str) -> Tuple[bool, Optional[Dict[str, Any]], str]:
