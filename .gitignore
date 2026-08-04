@@ -40,5 +40,8 @@ ENV/
 
 # Replays / Logs / Reports output
 replays/*.json
-reports/
+reports/*.json
+reports/*.csv
+!reports/*.md
+
 
