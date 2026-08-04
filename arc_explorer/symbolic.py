@@ -1,6 +1,6 @@
-"""Symbolic Hypothesis Graph Reasoning Engine for ARC-AGI tasks."""
+"""Symbolic Hypothesis Graph Reasoning Engine & N-depth DAG Planner for ARC-AGI tasks."""
 
-from typing import List, Dict, Tuple, Optional, Any
+from typing import List, Dict, Tuple, Optional, Any, Set
 import copy
 
 
@@ -260,8 +260,65 @@ class SymbolicHypothesis:
         }
 
 
+class SymbolicDAGPlanner:
+    """N-depth Acyclic Directed Graph (DAG) search planner for multi-stage symbolic reasoning."""
+
+    def __init__(self, max_depth: int = 4):
+        self.max_depth = max_depth
+
+    def search_dag_hypotheses(
+        self, train_pairs: List[Any], candidate_operators: List[SymbolicOperator]
+    ) -> List[SymbolicHypothesis]:
+        """Explores N-depth acyclic operator paths, avoiding state cycles."""
+        hypotheses: List[SymbolicHypothesis] = []
+        visited_paths: Set[Tuple[str, ...]] = set()
+
+        # Seed queue with 1-op paths
+        queue: List[List[SymbolicOperator]] = [[op] for op in candidate_operators]
+
+        while queue:
+            path = queue.pop(0)
+            path_signature = tuple(op.name for op in path)
+            if path_signature in visited_paths:
+                continue
+            visited_paths.add(path_signature)
+
+            hyp = SymbolicHypothesis(path)
+            hyp.evaluate_training_pairs(train_pairs)
+            hypotheses.append(hyp)
+
+            # If path achieved 100% exact match consistency on train pairs, don't expand further
+            if not hyp.is_rejected and hyp.score > 0.0:
+                continue
+
+            # Expand path if below max_depth
+            if len(path) < self.max_depth:
+                for next_op in candidate_operators:
+                    # Cycle prevention 1: Do not repeat exact same operator consecutively unless non-idempotent
+                    if path[-1].name == next_op.name and not isinstance(next_op, BoundingBoxCropOperator):
+                        continue
+
+                    # Cycle prevention 2: Check if next_op creates a grid state cycle on pair 0
+                    if train_pairs:
+                        in_g0 = train_pairs[0].input_grid
+                        grid_states = [in_g0]
+                        curr = [list(r) for r in in_g0]
+                        for op in path:
+                            curr = op.apply(curr)
+                            grid_states.append(curr)
+
+                        next_curr = next_op.apply(curr)
+                        # If next state is identical to any prior state in path, prune cycle
+                        if any(next_curr == prev for prev in grid_states):
+                            continue
+
+                    queue.append(path + [next_op])
+
+        return hypotheses
+
+
 class SymbolicHypothesisGraph:
-    """Symbolic Hypothesis Graph for generating, scoring, and executing general ARC rules."""
+    """Symbolic Hypothesis Graph for generating, scoring, and executing general ARC rules via N-depth DAG search."""
 
     def __init__(self):
         self.hypotheses: List[SymbolicHypothesis] = []
@@ -289,8 +346,16 @@ class SymbolicHypothesisGraph:
                         if in_g[r][c] != out_g[r][c]:
                             color_maps[in_g[r][c]] = out_g[r][c]
 
+            in_colors = set(c for r in in_g for c in r if c != 0)
+            out_colors = set(c for r in out_g for c in r if c != 0)
+            diff_in = in_colors - out_colors
+            diff_out = out_colors - in_colors
+            if len(diff_in) == 1 and len(diff_out) == 1:
+                color_maps[list(diff_in)[0]] = list(diff_out)[0]
+
         if color_maps:
             candidates.append(ColorMapOperator(color_maps))
+
 
         # Spatial translation candidates
         for pair in train_pairs:
@@ -310,34 +375,17 @@ class SymbolicHypothesisGraph:
 
         return candidates
 
-    def build_and_evaluate(self, train_pairs: List[Any]) -> SymbolicHypothesis:
-        """Builds symbolic hypothesis graph, evaluates candidates on train pairs, and returns best hypothesis."""
+    def build_and_evaluate(self, train_pairs: List[Any], max_depth: int = 4) -> SymbolicHypothesis:
+        """Builds symbolic hypothesis graph, performs N-depth DAG search, and returns optimal consistent hypothesis."""
         ops = self._generate_candidate_operators(train_pairs)
-        self.hypotheses.clear()
+        planner = SymbolicDAGPlanner(max_depth=max_depth)
+        self.hypotheses = planner.search_dag_hypotheses(train_pairs, ops)
 
-        # 1-op hypotheses
-        for op in ops:
-            hyp = SymbolicHypothesis([op])
-            hyp.evaluate_training_pairs(train_pairs)
-            self.hypotheses.append(hyp)
-
-        # 2-op compound hypotheses (e.g. Crop -> ColorMap or Scale -> ColorMap)
-        struct_ops = [op for op in ops if not isinstance(op, ColorMapOperator)]
-        color_ops = [op for op in ops if isinstance(op, ColorMapOperator)]
-
-        for s_op in struct_ops:
-            for c_op in color_ops:
-                hyp = SymbolicHypothesis([s_op, c_op])
-                hyp.evaluate_training_pairs(train_pairs)
-                self.hypotheses.append(hyp)
-
-        # Filter accepted non-rejected hypotheses
         valid_hyps = [h for h in self.hypotheses if not h.is_rejected]
         if valid_hyps:
             valid_hyps.sort(key=lambda h: h.score, reverse=True)
             best_hyp = valid_hyps[0]
         else:
-            # Fallback to identity
             best_hyp = SymbolicHypothesis([IdentityOperator()])
             best_hyp.evaluate_training_pairs(train_pairs)
 
@@ -346,5 +394,6 @@ class SymbolicHypothesisGraph:
             "total_hypotheses_evaluated": len(self.hypotheses),
             "valid_hypotheses_count": len(valid_hyps),
             "train_pairs_count": len(train_pairs),
+            "dag_depth": len(best_hyp.operators),
         }
         return best_hyp
