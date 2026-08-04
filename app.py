@@ -13,8 +13,11 @@ from arc_explorer.ui_helpers import (
     list_available_replays,
     list_available_arc_tasks,
     load_and_verify_replay,
+    scan_all_task_folders,
+    resolve_task_folder_path,
     COLOR_HEX_MAP,
 )
+
 
 
 def init_session_state():
@@ -475,44 +478,81 @@ def main():
         st.subheader("⚡ ARC Task Batch Evaluation Engine")
         st.caption("Evaluate all ARC JSON tasks in a specified folder, compute exact-match accuracy, and export reports.")
 
-        col_f_in, col_f_btn = st.columns([3, 1])
-        with col_f_in:
-            batch_folder_input = st.text_input("Folder Path to Batch Evaluate", value="samples")
-        with col_f_btn:
-            st.write("")
-            st.write("")
-            run_batch_eval_btn = st.button("🚀 Run Batch Evaluation", use_container_width=True)
+        # Detect local task folders dynamically
+        detected_folders = scan_all_task_folders(".")
+        default_folder = "data/arc_training" if "data/arc_training" in detected_folders else (
+            next(iter(detected_folders.keys())) if detected_folders else "data/arc_training"
+        )
+
+        col_sel, col_custom = st.columns([1, 1])
+
+        with col_sel:
+            folder_options = list(detected_folders.keys()) + ["Custom Path..."]
+            default_idx = folder_options.index(default_folder) if default_folder in folder_options else 0
+            selected_preset = st.selectbox(
+                "📁 Select Detected Task Folder",
+                options=folder_options,
+                index=default_idx,
+                format_func=lambda f: f"{f} ({detected_folders[f]} JSON tasks)" if f in detected_folders else f,
+                help="Choose a detected ARC task directory or select 'Custom Path...' to type a relative/absolute path."
+            )
+
+        with col_custom:
+            if selected_preset == "Custom Path...":
+                folder_input = st.text_input(
+                    "✏️ Custom Task Folder Path (Relative or Absolute)",
+                    value=default_folder,
+                    help="Enter relative path (e.g. data/arc_training) or absolute Windows path (e.g. C:\\path\\to\\tasks)"
+                )
+            else:
+                folder_input = selected_preset
+                st.text_input(
+                    "📌 Selected Folder Path",
+                    value=selected_preset,
+                    disabled=True,
+                )
+
+        # Resolve path and check existence & JSON file count
+        resolved_path, exists, file_count, status_msg = resolve_task_folder_path(folder_input, ".")
+
+        # Display pre-evaluation folder status badge
+        if exists and file_count > 0:
+            st.success(f"✅ Ready for Evaluation: {status_msg}")
+        elif exists and file_count == 0:
+            st.warning(f"⚠️ {status_msg}")
+        else:
+            st.error(f"❌ {status_msg}")
+
+        run_batch_eval_btn = st.button("🚀 Run Batch Evaluation", disabled=not (exists and file_count > 0), use_container_width=True)
 
         if run_batch_eval_btn:
-            if not os.path.exists(batch_folder_input):
-                st.error(f"Folder not found: `{batch_folder_input}`")
-            else:
-                progress_bar = st.progress(0.0)
-                status_text = st.empty()
+            progress_bar = st.progress(0.0)
+            status_text = st.empty()
 
-                def ui_progress(idx, total, filename):
-                    progress_bar.progress(idx / max(1, total))
-                    status_text.write(f"Evaluating task [{idx}/{total}]: `{filename}`...")
+            def ui_progress(idx, total, filename):
+                progress_bar.progress(idx / max(1, total))
+                status_text.write(f"Evaluating task [{idx}/{total}]: `{filename}`...")
 
-                try:
-                    report = BatchEvaluator.evaluate_folder(
-                        folder_path=batch_folder_input,
-                        max_steps=max_steps,
-                        progress_callback=ui_progress,
-                    )
+            try:
+                report = BatchEvaluator.evaluate_folder(
+                    folder_path=resolved_path,
+                    max_steps=max_steps,
+                    progress_callback=ui_progress,
+                )
 
-                    json_report_path = report.export_json(output_dir="reports")
-                    csv_report_path = report.export_csv(output_dir="reports")
+                json_report_path = report.export_json(output_dir="reports")
+                csv_report_path = report.export_csv(output_dir="reports")
 
-                    st.session_state.batch_report = {
-                        "report_obj": report,
-                        "json_path": json_report_path,
-                        "csv_path": csv_report_path,
-                    }
-                    progress_bar.progress(1.0)
-                    status_text.success("Batch evaluation completed! Reports exported to `reports/` folder.")
-                except Exception as e:
-                    st.error(f"Error during batch evaluation: {e}")
+                st.session_state.batch_report = {
+                    "report_obj": report,
+                    "json_path": json_report_path,
+                    "csv_path": csv_report_path,
+                }
+                progress_bar.progress(1.0)
+                status_text.success("Batch evaluation completed! Reports exported to `reports/` folder.")
+            except Exception as e:
+                st.error(f"Error during batch evaluation: {e}")
+
 
         if st.session_state.batch_report:
             b_info = st.session_state.batch_report

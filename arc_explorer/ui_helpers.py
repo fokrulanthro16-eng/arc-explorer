@@ -128,3 +128,52 @@ def load_and_verify_replay(filepath: str) -> Tuple[bool, Optional[Dict[str, Any]
     except Exception as e:
         return False, None, str(e)
 
+
+def scan_all_task_folders(project_root: str = ".") -> Dict[str, int]:
+    """Scans project directory for folders containing valid ARC task JSON files."""
+    abs_root = os.path.abspath(project_root)
+    detected_folders: Dict[str, int] = {}
+
+    for root, dirs, files in os.walk(abs_root):
+        # Ignore hidden/build directories
+        if any(ignored in root for ignored in [".git", "__pycache__", ".pytest_cache", "venv", "replays", "reports", "scratch"]):
+            continue
+
+        json_files = [f for f in files if f.endswith(".json") and not f.startswith(".")]
+        if json_files:
+            rel_path = os.path.relpath(root, abs_root).replace("\\", "/")
+            if rel_path == ".":
+                continue
+            detected_folders[rel_path] = len(json_files)
+
+    return detected_folders
+
+
+def resolve_task_folder_path(path_input: str, project_root: str = ".") -> Tuple[str, bool, int, str]:
+    """Resolves relative or absolute Windows folder paths and returns (abs_path, exists, file_count, status_msg)."""
+    if not path_input or not path_input.strip():
+        return "", False, 0, "No path provided."
+
+    clean_input = path_input.strip().strip('"').strip("'")
+    abs_root = os.path.abspath(project_root)
+
+    if os.path.isabs(clean_input):
+        resolved_path = os.path.abspath(clean_input)
+    else:
+        resolved_path = os.path.abspath(os.path.join(abs_root, clean_input))
+
+    if not os.path.exists(resolved_path):
+        return resolved_path, False, 0, f"Folder not found: `{clean_input}` (Resolved to `{resolved_path}`)"
+
+    if not os.path.isdir(resolved_path):
+        return resolved_path, False, 0, f"Path is not a directory: `{clean_input}`"
+
+    json_files = [f for f in os.listdir(resolved_path) if f.endswith(".json") and not f.startswith(".")]
+    file_count = len(json_files)
+
+    if file_count == 0:
+        return resolved_path, True, 0, f"Folder `{clean_input}` exists but contains 0 JSON task files."
+
+    return resolved_path, True, file_count, f"Found {file_count} ARC task JSON files in `{clean_input}`."
+
+

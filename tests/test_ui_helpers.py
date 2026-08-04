@@ -7,7 +7,10 @@ from arc_explorer.ui_helpers import (
     run_benchmark_evaluation,
     list_available_replays,
     load_and_verify_replay,
+    scan_all_task_folders,
+    resolve_task_folder_path,
 )
+
 from arc_explorer.agent import ExplorerAgent
 from arc_explorer.scenarios import create_scenario_1
 from arc_explorer.replay import ReplayLogger
@@ -69,4 +72,23 @@ def test_single_step_and_empty_grid_rendering():
     # Empty grid boundary check
     html_empty = render_grid_html([], (0, 0))
     assert "<div" in html_empty
+
+
+def test_task_folder_detection_and_resolution():
+    detected = scan_all_task_folders(".")
+    assert "data/arc_training" in detected
+    assert detected["data/arc_training"] == 20
+
+    # Resolve relative path
+    abs_p, exists, count, msg = resolve_task_folder_path("data/arc_training", ".")
+    assert exists
+    assert count == 20
+    assert "Found 20 ARC task JSON files" in msg
+
+    # Resolve non-existent path
+    _, exists_bad, count_bad, msg_bad = resolve_task_folder_path("non_existent_folder_xyz", ".")
+    assert not exists_bad
+    assert count_bad == 0
+    assert "Folder not found" in msg_bad
+
 
