@@ -2,6 +2,8 @@
 
 from typing import List, Dict, Tuple, Optional, Any, Set
 import copy
+from arc_explorer.object_perception import ObjectPerceptionEngine, ObjectCompositionEngine, ConnectedObject
+
 
 
 class SymbolicOperator:
@@ -242,6 +244,43 @@ class LineExtendOperator(SymbolicOperator):
         return out
 
 
+class ObjectTransformOperator(SymbolicOperator):
+    """Transforms isolated connected component objects filtered by color/size/position."""
+
+    def __init__(self, target_color: int, new_color: int, filter_type: str = "all", dr: int = 0, dc: int = 0):
+        super().__init__(f"ObjectTransform({target_color}->{new_color},{filter_type})", complexity=1.2)
+        self.target_color = target_color
+        self.new_color = new_color
+        self.filter_type = filter_type
+        self.dr = dr
+        self.dc = dc
+
+    def apply(self, grid: List[List[int]]) -> List[List[int]]:
+        if not grid or not grid[0]:
+            return grid
+        h, w = len(grid), len(grid[0])
+        objects = ObjectPerceptionEngine.detect_objects(grid)
+        if not objects:
+            return [list(r) for r in grid]
+
+        target_objs = ObjectPerceptionEngine.filter_objects(
+            objects, color=self.target_color, position_filter=self.filter_type if self.filter_type != "all" else None
+        )
+        target_ids = set(o.object_id for o in target_objs)
+
+        transformed_objects: List[ConnectedObject] = []
+        for obj in objects:
+            if obj.object_id in target_ids:
+                recolored = ObjectCompositionEngine.recolor_object(obj, self.new_color)
+                if self.dr != 0 or self.dc != 0:
+                    recolored = ObjectCompositionEngine.translate_object(recolored, self.dr, self.dc)
+                transformed_objects.append(recolored)
+            else:
+                transformed_objects.append(obj)
+
+        return ObjectCompositionEngine.render_canvas(transformed_objects, (h, w))
+
+
 class ParameterSynthesisEngine:
     """Dynamic Parameter Synthesis Engine for ARC transformation operators."""
 
@@ -280,7 +319,7 @@ class ParameterSynthesisEngine:
         for axis in ["main_diagonal", "anti_diagonal"]:
             candidates.append(ReflectionOperator(axis))
 
-        # 3. Infer Color Substitution Maps
+        # 3. Infer Color Substitution Maps & Object Component Transforms
         color_maps: Dict[int, int] = {}
         for pair in train_pairs:
             in_g, out_g = pair.input_grid, pair.output_grid
@@ -301,6 +340,8 @@ class ParameterSynthesisEngine:
             candidates.append(ColorMapOperator(color_maps))
             for k, v in color_maps.items():
                 candidates.append(ObjectMaskOperator(k, v))
+                for filter_t in ["all", "largest", "smallest"]:
+                    candidates.append(ObjectTransformOperator(k, v, filter_type=filter_t))
 
         # 4. Infer Spatial Translation Vectors
         for pair in train_pairs:
@@ -325,6 +366,7 @@ class ParameterSynthesisEngine:
                 unique_candidates[op.name] = op
 
         return list(unique_candidates.values())
+
 
 
 class SymbolicHypothesis:
