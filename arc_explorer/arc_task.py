@@ -113,11 +113,13 @@ class ARCTaskRule(BaseRule):
                 hazard = True
 
         # Check task completion
+        info["target_output_grid"] = self.target_output_grid
         if self.target_output_grid and next_grid == self.target_output_grid:
             reward += 50.0
             info["success"] = True
 
         return next_grid, next_pos, reward, hazard, state_vars, info
+
 
 
 def create_arc_task_environment(

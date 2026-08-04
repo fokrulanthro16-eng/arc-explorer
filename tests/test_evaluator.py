@@ -53,8 +53,8 @@ def test_evaluator_batch_folder_and_reports():
 
         assert report.total_tasks >= 2
         assert report.completed_tasks >= 2
-        assert report.exact_match_pct >= 50.0
-        assert report.exact_matches >= 1
+        assert report.exact_match_pct == 100.0
+        assert report.exact_matches == 2
         assert report.avg_runtime_sec > 0.0
         assert report.median_runtime_sec > 0.0
 
@@ -72,6 +72,7 @@ def test_evaluator_batch_folder_and_reports():
             csv_lines = f.readlines()
             assert len(csv_lines) >= 3
             assert "task_id" in csv_lines[0]
+
 
 
 
