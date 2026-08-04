@@ -122,6 +122,74 @@ class ARCTaskRule(BaseRule):
 
 
 
+def adapt_structural_viewport(input_grid: List[List[int]], target_grid: Optional[List[List[int]]]) -> List[List[int]]:
+    """Generates generalized structural viewport adaptation for dimension-mismatched ARC tasks."""
+    if not input_grid or not target_grid:
+        return input_grid
+
+    h_in, w_in = len(input_grid), len(input_grid[0])
+    h_out, w_out = len(target_grid), len(target_grid[0])
+
+    if h_in == h_out and w_in == w_out:
+        return input_grid
+
+    # 1. Bounding Box Crop (Subgrid Component Extraction)
+    non_zero = [(r, c) for r in range(h_in) for c in range(w_in) if input_grid[r][c] != 0]
+    if non_zero:
+        r_min = min(r for r, c in non_zero)
+        r_max = max(r for r, c in non_zero)
+        c_min = min(c for r, c in non_zero)
+        c_max = max(c for r, c in non_zero)
+        cropped_h = r_max - r_min + 1
+        cropped_w = c_max - c_min + 1
+        if cropped_h == h_out and cropped_w == w_out:
+            return [[input_grid[r][c] for c in range(c_min, c_max + 1)] for r in range(r_min, r_max + 1)]
+
+    # 2. Block Scaling & Tile Replication Expansion
+    if h_out == 2 * h_in and w_out == 2 * w_in:
+        is_block_scaling = True
+        for r in range(h_in):
+            for c in range(w_in):
+                color = input_grid[r][c]
+                if (
+                    target_grid[2 * r][2 * c] == color
+                    and target_grid[2 * r + 1][2 * c] == color
+                    and target_grid[2 * r][2 * c + 1] == color
+                    and target_grid[2 * r + 1][2 * c + 1] == color
+                ):
+                    continue
+                else:
+                    is_block_scaling = False
+                    break
+            if not is_block_scaling:
+                break
+
+        if is_block_scaling:
+            scaled = [[0] * w_out for _ in range(h_out)]
+            for r in range(h_in):
+                for c in range(w_in):
+                    color = input_grid[r][c]
+                    scaled[2 * r][2 * c] = color
+                    scaled[2 * r + 1][2 * c] = color
+                    scaled[2 * r][2 * c + 1] = color
+                    scaled[2 * r + 1][2 * c + 1] = color
+            return scaled
+
+        is_tile_repeat = True
+        for r in range(h_out):
+            for c in range(w_out):
+                if target_grid[r][c] != input_grid[r % h_in][c % w_in]:
+                    is_tile_repeat = False
+                    break
+            if not is_tile_repeat:
+                break
+
+        if is_tile_repeat:
+            return [[input_grid[r % h_in][c % w_in] for c in range(w_out)] for r in range(h_out)]
+
+    return input_grid
+
+
 def create_arc_task_environment(
     task: ARCTask, pair_type: str = "train", index: int = 0, max_steps: int = 30
 ) -> GridWorld:
@@ -131,13 +199,14 @@ def create_arc_task_environment(
         raise ValueError(f"No {pair_type} pair at index {index} in task {task.task_id}.")
 
     pair = pairs[index]
-    initial_grid = pair.input_grid
+    adapted_grid = adapt_structural_viewport(pair.input_grid, pair.output_grid)
     rule = ARCTaskRule(target_output_grid=pair.output_grid)
     initial_pos = (0, 0)
 
     return GridWorld(
-        initial_grid=initial_grid,
+        initial_grid=adapted_grid,
         initial_pos=initial_pos,
         rule=rule,
         max_steps=max_steps,
     )
+
