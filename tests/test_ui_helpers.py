@@ -75,20 +75,37 @@ def test_single_step_and_empty_grid_rendering():
 
 
 def test_task_folder_detection_and_resolution():
-    detected = scan_all_task_folders(".")
-    assert "data/arc_training" in detected
-    assert detected["data/arc_training"] == 20
+    """Test scan_all_task_folders and resolve_task_folder_path using an
+    isolated temporary directory so the test never depends on the size
+    of the user's local ARC dataset."""
+    import json
 
-    # Resolve relative path
-    abs_p, exists, count, msg = resolve_task_folder_path("data/arc_training", ".")
-    assert exists
-    assert count == 20
-    assert "Found 20 ARC task JSON files" in msg
+    num_fixture_files = 5
 
-    # Resolve non-existent path
-    _, exists_bad, count_bad, msg_bad = resolve_task_folder_path("non_existent_folder_xyz", ".")
-    assert not exists_bad
-    assert count_bad == 0
-    assert "Folder not found" in msg_bad
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create a known sub-folder with fixture JSON files
+        task_dir = os.path.join(tmpdir, "tasks", "arc_training")
+        os.makedirs(task_dir)
+        for i in range(num_fixture_files):
+            fpath = os.path.join(task_dir, f"task_{i:04d}.json")
+            with open(fpath, "w") as f:
+                json.dump({"train": [], "test": []}, f)
 
+        # scan_all_task_folders should discover the fixture folder
+        detected = scan_all_task_folders(tmpdir)
+        assert "tasks/arc_training" in detected
+        assert detected["tasks/arc_training"] == num_fixture_files
 
+        # resolve_task_folder_path – valid relative path
+        abs_p, exists, count, msg = resolve_task_folder_path("tasks/arc_training", tmpdir)
+        assert exists
+        assert count == num_fixture_files
+        assert f"Found {num_fixture_files} ARC task JSON files" in msg
+
+        # resolve_task_folder_path – non-existent path
+        _, exists_bad, count_bad, msg_bad = resolve_task_folder_path(
+            "non_existent_folder_xyz", tmpdir
+        )
+        assert not exists_bad
+        assert count_bad == 0
+        assert "Folder not found" in msg_bad
