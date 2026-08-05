@@ -469,6 +469,200 @@ class RaycastLineExtensionOperator(SymbolicOperator):
         ]
 
 
+class GravityDropOperator(SymbolicOperator):
+    """Simulates gravity: coloured cells fall/slide in a cardinal direction
+    until they rest against the grid boundary or a fixed obstacle.
+
+    Handles per-colour selectivity (some colours can be fixed while
+    others fall) and preserves relative order of falling cells.
+    All parameters are inferred dynamically from training pairs.
+    """
+
+    CARDINAL_DIRECTIONS = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+
+    def __init__(
+        self,
+        direction: Tuple[int, int],
+        affected_colors: Optional[Set[int]] = None,
+        background: int = 0,
+    ):
+        dir_labels = {
+            (-1, 0): "up", (1, 0): "down",
+            (0, -1): "left", (0, 1): "right",
+        }
+        dir_name = dir_labels.get(direction, str(direction))
+        colors_tag = (
+            "all"
+            if affected_colors is None
+            else ",".join(str(c) for c in sorted(affected_colors))
+        )
+        super().__init__(
+            f"GravityDrop({dir_name},colors={colors_tag})", complexity=1.3,
+        )
+        self.direction = direction
+        self.affected_colors = affected_colors  # None \u2192 all non-background
+        self.background = background
+
+    # \u2500\u2500 helpers \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+
+    def _is_affected(self, color: int) -> bool:
+        if color == self.background:
+            return False
+        if self.affected_colors is None:
+            return True
+        return color in self.affected_colors
+
+    def _drop_line(self, line: List[int], forward: bool) -> List[int]:
+        """Gravity-compact a 1-D line.
+
+        *forward=True*  \u2192 cells fall toward higher indices (down / right).
+        *forward=False* \u2192 cells fall toward lower indices  (up / left).
+
+        Fixed (non-affected, non-background) cells act as obstacles;
+        the line is split into independent segments between them and
+        each segment is compacted separately.
+        """
+        n = len(line)
+        result = list(line)
+
+        # Identify fixed obstacle positions
+        fixed_positions = sorted(
+            i for i in range(n)
+            if result[i] != self.background and not self._is_affected(result[i])
+        )
+
+        # Build segments between fixed positions
+        segments: List[Tuple[int, int]] = []  # (start, exclusive_end)
+        prev = 0
+        for fp in fixed_positions:
+            if prev < fp:
+                segments.append((prev, fp))
+            prev = fp + 1
+        if prev < n:
+            segments.append((prev, n))
+
+        for start, end in segments:
+            affected: List[int] = []
+            for i in range(start, end):
+                if self._is_affected(result[i]):
+                    affected.append(result[i])
+                    result[i] = self.background
+
+            if not affected:
+                continue
+
+            if forward:
+                slot = end - 1
+                for cell in reversed(affected):
+                    while slot >= start and result[slot] != self.background:
+                        slot -= 1
+                    if slot >= start:
+                        result[slot] = cell
+                        slot -= 1
+            else:
+                slot = start
+                for cell in affected:
+                    while slot < end and result[slot] != self.background:
+                        slot += 1
+                    if slot < end:
+                        result[slot] = cell
+                        slot += 1
+
+        return result
+
+    # \u2500\u2500 grid transformation \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+
+    def apply(self, grid: List[List[int]]) -> List[List[int]]:
+        if not grid or not grid[0]:
+            return grid
+        h, w = len(grid), len(grid[0])
+        out = [list(row) for row in grid]
+        dr, dc = self.direction
+
+        if dc == 0:
+            # Vertical gravity \u2014 process each column
+            for c in range(w):
+                col = [out[r][c] for r in range(h)]
+                new_col = self._drop_line(col, forward=(dr > 0))
+                for r in range(h):
+                    out[r][c] = new_col[r]
+        else:
+            # Horizontal gravity \u2014 process each row
+            for r in range(h):
+                out[r] = self._drop_line(list(out[r]), forward=(dc > 0))
+
+        return out
+
+    def to_dict(self) -> Dict[str, Any]:
+        base = super().to_dict()
+        base.update({
+            "direction": self.direction,
+            "affected_colors": (
+                sorted(self.affected_colors) if self.affected_colors else None
+            ),
+        })
+        return base
+
+    # \u2500\u2500 parameter inference from training pairs \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+
+    @staticmethod
+    def infer_from_pairs(
+        train_pairs: List[Any], background: int = 0,
+    ) -> List["GravityDropOperator"]:
+        """Tries all four cardinal directions.  For each direction it
+        first tests with *all* colours falling, then tries leaving each
+        colour fixed in turn.  Returns every configuration that
+        reproduces all training outputs exactly."""
+        candidates: List["GravityDropOperator"] = []
+
+        for pair in train_pairs:
+            in_g, out_g = pair.input_grid, pair.output_grid
+            if not in_g or not in_g[0]:
+                return []
+            if len(in_g) != len(out_g) or len(in_g[0]) != len(out_g[0]):
+                return []
+            # Gravity only rearranges cells \u2014 colour multiset must match
+            if sorted(c for r in in_g for c in r) != sorted(
+                c for r in out_g for c in r
+            ):
+                return []
+
+        # Collect all non-background colours across every pair
+        all_colors: Set[int] = set()
+        for pair in train_pairs:
+            for row in pair.input_grid:
+                for c in row:
+                    if c != background:
+                        all_colors.add(c)
+
+        for direction in GravityDropOperator.CARDINAL_DIRECTIONS:
+            # Try 1: all colours fall
+            test_all = GravityDropOperator(direction, None, background)
+            if all(
+                test_all.apply(p.input_grid) == p.output_grid
+                for p in train_pairs
+            ):
+                candidates.append(test_all)
+                continue  # no need to try partial for this direction
+
+            # Try 2: one colour is fixed, the rest fall
+            for fixed in all_colors:
+                affected = all_colors - {fixed}
+                if not affected:
+                    continue
+                test_partial = GravityDropOperator(
+                    direction, affected, background,
+                )
+                if all(
+                    test_partial.apply(p.input_grid) == p.output_grid
+                    for p in train_pairs
+                ):
+                    candidates.append(test_partial)
+                    break  # found working config for this direction
+
+        return candidates
+
+
 class ObjectTransformOperator(SymbolicOperator):
     """Transforms isolated connected component objects filtered by color/size/position."""
 
@@ -749,6 +943,10 @@ class ParameterSynthesisEngine:
         # 7. Raycast Line Extension
         raycast_candidates = RaycastLineExtensionOperator.infer_from_pairs(train_pairs)
         candidates.extend(raycast_candidates)
+
+        # 8. Gravity Drop
+        gravity_candidates = GravityDropOperator.infer_from_pairs(train_pairs)
+        candidates.extend(gravity_candidates)
 
         # Deduplicate candidates by name
         unique_candidates: Dict[str, SymbolicOperator] = {}
