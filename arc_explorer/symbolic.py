@@ -663,6 +663,60 @@ class GravityDropOperator(SymbolicOperator):
         return candidates
 
 
+class FractalTilingOperator(SymbolicOperator):
+    """Self-referential fractal tiling: the input grid serves as both
+    the pattern *and* the placement map.
+
+    For an N\u00d7M input, the output is (N\u00b7N)\u00d7(M\u00b7M).  Each non-zero cell
+    in the input is replaced by a full copy of the input pattern;
+    each zero cell becomes an all-zero N\u00d7M block.
+
+    Solves ARC task families like 007bbfb7.
+    """
+
+    def __init__(self):
+        super().__init__("FractalTiling", complexity=1.2)
+
+    def apply(self, grid: List[List[int]]) -> List[List[int]]:
+        if not grid or not grid[0]:
+            return grid
+        h, w = len(grid), len(grid[0])
+        out_h, out_w = h * h, w * w
+        out = [[0] * out_w for _ in range(out_h)]
+
+        for br in range(h):
+            for bc in range(w):
+                if grid[br][bc] != 0:
+                    # Stamp the full input pattern into this block
+                    r_off = br * h
+                    c_off = bc * w
+                    for r in range(h):
+                        for c in range(w):
+                            out[r_off + r][c_off + c] = grid[r][c]
+
+        return out
+
+    @staticmethod
+    def infer_from_pairs(
+        train_pairs: List[Any], background: int = 0,
+    ) -> List["FractalTilingOperator"]:
+        """Detects the dimension-squaring signature (N\u2192N\u00b2, M\u2192M\u00b2)
+        and verifies that fractal tiling reproduces all outputs."""
+        op = FractalTilingOperator()
+        for pair in train_pairs:
+            in_g, out_g = pair.input_grid, pair.output_grid
+            if not in_g or not in_g[0]:
+                return []
+            h_in, w_in = len(in_g), len(in_g[0])
+            h_out, w_out = len(out_g), len(out_g[0])
+            # Dimension signature: output must be exactly input\u00b2
+            if h_out != h_in * h_in or w_out != w_in * w_in:
+                return []
+            if op.apply(in_g) != out_g:
+                return []
+        return [op]
+
+
 class ObjectTransformOperator(SymbolicOperator):
     """Transforms isolated connected component objects filtered by color/size/position."""
 
@@ -947,6 +1001,10 @@ class ParameterSynthesisEngine:
         # 8. Gravity Drop
         gravity_candidates = GravityDropOperator.infer_from_pairs(train_pairs)
         candidates.extend(gravity_candidates)
+
+        # 9. Fractal Tiling
+        fractal_candidates = FractalTilingOperator.infer_from_pairs(train_pairs)
+        candidates.extend(fractal_candidates)
 
         # Deduplicate candidates by name
         unique_candidates: Dict[str, SymbolicOperator] = {}
